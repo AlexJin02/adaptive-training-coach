@@ -51,7 +51,7 @@ def seed_demo(db: Session, today: date | None = None) -> int:
         (22, "Easy Volume", 90, 4, 8),
         (15, "Tension Board", 105, 8, 15),
         (8, "Limit Bouldering", 120, 8, 18),
-        (1, "Limit Bouldering", 145, 9, 22),
+        (0, "Limit Bouldering", 145, 9, 22),
     ]:
         core.create_completed_session(
             db,

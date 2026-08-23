@@ -56,6 +56,10 @@ def record_completed_session(db: Session, values: dict[str, Any]) -> models.Comp
     return item
 
 
+def delete_completed_session(db: Session, session_id: int) -> int:
+    return core.delete_completed_session(db, session_id)
+
+
 def record_recovery_checkin(db: Session, values: dict[str, Any]) -> models.RecoveryCheckin:
     item = core.create_recovery_checkin(db, values)
     core.persist_load_readiness_snapshot(db, source_key=f"recovery:{item.id}")

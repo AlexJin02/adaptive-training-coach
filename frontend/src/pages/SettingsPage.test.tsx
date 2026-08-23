@@ -39,4 +39,35 @@ describe('athlete climbing goals', () => {
     expect(payload).toMatchObject({ tb2_long_term_goal: 'V11', outdoor_boulder_goal: 'V12' })
     expect(payload).not.toHaveProperty('bouldering_goal')
   })
+
+  it('shows baseline race times as clock values and saves them as seconds', async () => {
+    const profile = {
+      id: 1, display_name: 'Athlete', timezone: 'Europe/London', running_phase: 'AEROBIC_BASE', climbing_phase: 'MAX_STRENGTH',
+      current_half_marathon_seconds: 6300, half_marathon_primary_goal_seconds: 5399,
+      half_marathon_stretch_goal_seconds: 5100, marathon_goal_seconds: 11700,
+    }
+    const mock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      const body = init?.method === 'PATCH' ? JSON.parse(String(init.body))
+        : url.includes('/athlete/profile') ? profile
+          : url.includes('/settings') ? { gym_name: 'Home Gym', grade_display: 'BOTH', retain_screenshots: false, retain_audio: false }
+            : { items: [] }
+      return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    })
+    vi.stubGlobal('fetch', mock)
+    const user = userEvent.setup()
+    render(<SettingsPage />)
+
+    expect(await screen.findByLabelText('Current HM performance')).toHaveValue('1:45:00')
+    const primary = screen.getByLabelText('Primary HM goal')
+    expect(primary).toHaveValue('1:29:59')
+    await user.clear(primary)
+    await user.type(primary, '1:30:00')
+    await user.click(screen.getByRole('button', { name: 'Save profile' }))
+
+    await waitFor(() => expect(mock.mock.calls.some(([, init]) => init?.method === 'PATCH')).toBe(true))
+    const patchCall = mock.mock.calls.find(([, init]) => init?.method === 'PATCH')
+    const payload = JSON.parse(String(patchCall?.[1]?.body)) as Record<string, unknown>
+    expect(payload.half_marathon_primary_goal_seconds).toBe(5400)
+  })
 })

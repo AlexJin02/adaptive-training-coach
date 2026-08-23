@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api, ApiError } from '../api/client'
 import { useResource } from '../api/hooks'
 import { useCapabilities } from '../app/CapabilityProvider'
 import { Icon } from '../components/Icon'
 import { Button, Card, ConfidencePill, EmptyState, ErrorPanel, Field, FormActions, InlineNotice, LoadingGrid, Modal, PageHeader, Pill, SelectField, Tabs, TextAreaField, formatEnum } from '../components/ui'
-import { formatDate, formatDuration, formatNumber, formatRaceTime, localIsoDate, recordLabel } from '../lib/format'
+import { formatDate, formatDuration, formatNumber, formatRaceTime, localIsoDate, parseDurationInput, recordLabel } from '../lib/format'
 import type { CompletedSession, ExtractionField, WorkoutExtraction, WorkoutKind } from '../types'
 
 const runningTypes = ['Easy', 'Recovery', 'Long Run', 'Steady', 'Progression', 'Threshold', 'Tempo', 'Cruise Intervals', 'VO2max', 'Intervals', 'Hill Repeats', 'Fartlek', 'Strides', 'HM Pace', 'Marathon Pace', 'Time Trial', 'Race']
@@ -37,7 +37,7 @@ export function WorkoutLogPage(): React.JSX.Element {
   return <div className="page workouts-page">
     <PageHeader eyebrow="EVIDENCE" title="Workout Log" description="Fast entry for completed training, with optional detail when it matters." actions={<div className="button-row"><Button variant="ghost" icon="upload" onClick={() => { setMode('image'); setModalOpen(true) }}>Import</Button><Button icon="plus" onClick={() => { setMode('manual'); setModalOpen(true) }}>Log workout</Button></div>} />
     <Card className="filter-bar"><div className="search-field"><Icon name="search" /><input aria-label="Search workouts" placeholder="Search sessions or notes" value={search} onChange={(event) => setSearch(event.target.value)} /></div><SelectField label="Activity filter" className="compact-field" value={filter} onChange={(event) => setFilter(event.target.value as typeof filter)}><option value="ALL">All activities</option><option value="RUNNING">Running</option><option value="CLIMBING">Climbing</option><option value="STRENGTH">Strength</option><option value="CROSSFIT_CONDITIONING">CrossFit / conditioning</option><option value="MOBILITY_RECOVERY">Mobility / recovery</option></SelectField></Card>
-    {resource.loading ? <LoadingGrid count={5} /> : resource.error ? <ErrorPanel message={resource.error.message} onRetry={resource.reload} /> : items.length ? <div className="workout-table"><div className="workout-row workout-head"><span>Date</span><span>Activity</span><span>Session</span><span>Duration</span><span>Load</span><span>Details</span></div>{items.map((session) => <WorkoutRow key={session.id} session={session} />)}</div> : <EmptyState icon="workouts" title="No matching workouts" message="A basic session only needs date, duration and RPE. Add detail when it improves the evidence." action={<Button icon="plus" onClick={() => setModalOpen(true)}>Log first workout</Button>} />}
+    {resource.loading ? <LoadingGrid count={5} /> : resource.error ? <ErrorPanel message={resource.error.message} onRetry={resource.reload} /> : items.length ? <div className="workout-table"><div className="workout-row workout-head"><span>Date</span><span>Activity</span><span>Session</span><span>Duration</span><span>Load</span><span>Details</span></div>{items.map((session) => <WorkoutRow key={session.id} session={session} onChanged={resource.reload} />)}</div> : <EmptyState icon="workouts" title="No matching workouts" message="A basic session only needs date, duration and RPE. Add detail when it improves the evidence." action={<Button icon="plus" onClick={() => setModalOpen(true)}>Log first workout</Button>} />}
     <Modal open={modalOpen} title="Record completed training" onClose={close} wide>
       <Tabs label="Workout input method" value={mode} onChange={setMode} items={[{ value: 'manual', label: 'Manual' }, { value: 'image', label: 'Screenshot' }, { value: 'text', label: 'Quick text' }]} />
       {mode === 'manual' ? <ManualWorkoutForm initial={{ planned_session_id: requestedPlanId }} onSaved={() => { close(); resource.reload() }} /> : mode === 'image' ? <ScreenshotImport onSaved={() => { close(); resource.reload() }} onManual={() => setMode('manual')} /> : <TextImport onSaved={() => { close(); resource.reload() }} onManual={() => setMode('manual')} />}
@@ -45,13 +45,19 @@ export function WorkoutLogPage(): React.JSX.Element {
   </div>
 }
 
-function WorkoutRow({ session }: { session: CompletedSession }): React.JSX.Element {
+function WorkoutRow({ session, onChanged }: { session: CompletedSession; onChanged: () => void }): React.JSX.Element {
   const [open, setOpen] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const strength = session.strength
   const strengthSets = session.strength_sets ?? strength?.sets ?? []
   const workoutName = session.workout_name ?? strength?.workout_name
   const rounds = session.rounds ?? strength?.rounds
   const resultTime = session.result_time_seconds ?? strength?.result_time_seconds
+  const aiSummary = compactAnalysisText(session.ai_analysis)
+  const aiConfidence = session.ai_analysis?.confidence
+  const deleteRecord = async () => { setBusy(true); setError(null); try { await api.deleteCompletedSession(session.id); setOpen(false); onChanged() } catch (reason) { setError(reason instanceof ApiError ? reason.message : 'Unable to delete this workout.') } finally { setBusy(false) } }
   return <>
     <article className="workout-row"><span data-label="Date">{formatDate(session.date)}</span><span data-label="Activity"><Pill tone={session.workout_kind === 'RUNNING' ? 'run' : session.workout_kind === 'CLIMBING' ? 'climb' : 'neutral'}>{formatEnum(session.workout_kind)}</Pill>{session.is_demo && <Pill tone="moderate">DEMO</Pill>}</span><span data-label="Session"><strong>{session.title ?? session.session_type}</strong><small>{session.distance_km ? `${formatNumber(session.distance_km, 1)} km` : session.gym_or_crag ?? workoutName ?? ''}</small></span><span data-label="Duration">{formatDuration(session.duration_minutes)}<small>{session.rpe ? `RPE ${session.rpe}` : 'RPE missing'}</small></span><span data-label="Load">{session.srpe_load != null ? `${Math.round(session.srpe_load)} AU` : '—'}</span><span data-label="Details"><Button variant="ghost" aria-label={`View ${session.title ?? session.session_type}`} icon="chevron" onClick={() => setOpen(true)} /></span></article>
     <Modal open={open} title={session.title ?? formatEnum(session.session_type)} onClose={() => setOpen(false)}><div className="stack-form">
@@ -62,10 +68,21 @@ function WorkoutRow({ session }: { session: CompletedSession }): React.JSX.Eleme
       <DetailRecords title="Climbing attempts" records={session.climbing_attempts} />
       <DetailRecords title="Strength sets" records={strengthSets} />
       {session.notes && <Card title="Session notes"><p>{session.notes}</p></Card>}
-      {session.ai_analysis && <Card title="AI session analysis"><pre className="detail-json">{recordLabel(session.ai_analysis)}</pre><p className="card-note">Evidence-based enrichment only; deterministic rules remain binding.</p></Card>}
-      {!session.ai_analysis && <InlineNotice>AI analysis is not available for this session. Recorded metrics and deterministic load remain complete.</InlineNotice>}
+      {session.subjective_feedback_text && <Card title="How this run felt"><p>{session.subjective_feedback_text}</p><p className="card-note">{session.subjective_feedback_source === 'VOICE' ? 'Voice transcript, reviewed by athlete' : 'Written by athlete'}</p></Card>}
+      {aiSummary && <Card title="AI session analysis"><p>{aiSummary}</p><p className="card-note">{typeof aiConfidence === 'string' ? `${formatEnum(aiConfidence)} confidence · ` : ''}Maximum 200 characters. Deterministic rules remain binding.</p></Card>}
+      {!aiSummary && <InlineNotice>AI analysis is not available for this session. Recorded metrics and deterministic load remain complete.</InlineNotice>}
+      {error && <InlineNotice tone="warning">{error}</InlineNotice>}
+      {confirmDelete ? <InlineNotice tone="warning" title="Permanently delete this workout?"><p>This cannot be undone. The workout and its detailed evidence will be removed, and training calculations will be updated.</p><div className="button-row"><Button variant="ghost" disabled={busy} onClick={() => setConfirmDelete(false)}>Cancel</Button><Button variant="danger" disabled={busy} onClick={() => void deleteRecord()}>{busy ? 'Deleting…' : 'Delete permanently'}</Button></div></InlineNotice> : <FormActions><Button variant="danger" onClick={() => setConfirmDelete(true)}>Delete workout</Button></FormActions>}
     </div></Modal>
   </>
+}
+
+function compactAnalysisText(value?: Record<string, unknown> | null): string {
+  const raw = value?.summary ?? value?.execution_summary
+  if (typeof raw !== 'string') return ''
+  const normalized = raw.replace(/\s+/g, ' ').trim()
+  const characters = [...normalized]
+  return characters.length <= 200 ? normalized : `${characters.slice(0, 199).join('').trimEnd()}…`
 }
 
 function DetailRecords({ title, records }: { title: string; records?: Array<Record<string, unknown>> }): React.JSX.Element | null {
@@ -80,7 +97,7 @@ interface WorkoutDraft {
   workout_name: string; rounds: string; result_time: string
 }
 
-const initialDraft: WorkoutDraft = { date: localIsoDate(), start_time: '', workout_kind: 'RUNNING', session_type: 'Easy', duration_minutes: '45', rpe: '3', notes: '', planned_session_id: '', distance_km: '', average_pace: '', average_hr: '', max_hr: '', elevation_m: '', cadence: '', power_w: '', gym_or_crag: '', hard_attempts: '', max_attempted: '', max_sent: '', workout_name: '', rounds: '', result_time: '' }
+const initialDraft: WorkoutDraft = { date: localIsoDate(), start_time: '', workout_kind: 'RUNNING', session_type: 'Easy', duration_minutes: '45:00', rpe: '3', notes: '', planned_session_id: '', distance_km: '', average_pace: '', average_hr: '', max_hr: '', elevation_m: '', cadence: '', power_w: '', gym_or_crag: '', hard_attempts: '', max_attempted: '', max_sent: '', workout_name: '', rounds: '', result_time: '' }
 
 function ManualWorkoutForm({ onSaved, initial }: { onSaved: () => void; initial?: Partial<WorkoutDraft> }): React.JSX.Element {
   const [form, setForm] = useState<WorkoutDraft>({ ...initialDraft, ...initial })
@@ -93,12 +110,13 @@ function ManualWorkoutForm({ onSaved, initial }: { onSaved: () => void; initial?
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const typeOptions = form.workout_kind === 'RUNNING' ? runningTypes : form.workout_kind === 'CLIMBING' ? climbingTypes : form.workout_kind === 'STRENGTH' ? ['Strength'] : form.workout_kind === 'CROSSFIT_CONDITIONING' ? ['CrossFit / Conditioning'] : ['Mobility / Recovery']
+  const durationPreview = parseDurationInput(form.duration_minutes)
   const set = (key: keyof WorkoutDraft, value: string) => setForm((current) => ({ ...current, [key]: value }))
   const changeKind = (kind: WorkoutKind) => setForm((current) => ({ ...current, workout_kind: kind, session_type: kind === 'RUNNING' ? 'Easy' : kind === 'CLIMBING' ? 'Bouldering' : kind === 'STRENGTH' ? 'Strength' : kind === 'CROSSFIT_CONDITIONING' ? 'CrossFit / Conditioning' : 'Mobility / Recovery' }))
   const submit = async (event: FormEvent) => {
     event.preventDefault(); setError(null)
-    const duration = Number(form.duration_minutes); const rpe = form.rpe === '' ? null : Number(form.rpe)
-    if (!duration || duration < 1) { setError('Duration must be at least one minute.'); return }
+    const duration = parseDurationInput(form.duration_minutes); const rpe = form.rpe === '' ? null : Number(form.rpe)
+    if (duration == null || duration < 1) { setError('Duration must be at least one minute and use minutes, M:SS, or H:MM:SS.'); return }
     if (rpe != null && (!Number.isFinite(rpe) || rpe < 1 || rpe > 10)) { setError('When entered, RPE must be between 1 and 10.'); return }
     setBusy(true)
     const numericOrNull = (value: string) => value === '' ? null : Number(value)
@@ -120,13 +138,13 @@ function ManualWorkoutForm({ onSaved, initial }: { onSaved: () => void; initial?
       <SelectField label="Session type" value={form.session_type} onChange={(event) => set('session_type', event.target.value)}>{typeOptions.map((item) => <option key={item}>{item}</option>)}</SelectField>
       <Field label="Date" required type="date" value={form.date} onChange={(event) => set('date', event.target.value)} />
       <Field label="Start time" type="time" value={form.start_time} onChange={(event) => set('start_time', event.target.value)} />
-      <Field label="Duration (minutes)" required type="number" min="1" value={form.duration_minutes} onChange={(event) => set('duration_minutes', event.target.value)} />
-      <Field label="RPE (1–10) · optional" type="number" min="1" max="10" value={form.rpe} onChange={(event) => set('rpe', event.target.value)} hint={form.duration_minutes && form.rpe ? `Preview: ${Number(form.duration_minutes) * Number(form.rpe)} AU` : 'Load remains unavailable until RPE is recorded.'} />
+      <Field label="Duration" required inputMode="numeric" placeholder="45:00 or 1:05:01" value={form.duration_minutes} onChange={(event) => set('duration_minutes', event.target.value)} hint="Use M:SS or H:MM:SS. A plain number is treated as minutes." />
+      <Field label="RPE (1–10) · optional" type="number" min="1" max="10" value={form.rpe} onChange={(event) => set('rpe', event.target.value)} hint={durationPreview != null && form.rpe ? `Preview: ${Math.round(durationPreview * Number(form.rpe))} AU` : 'Load remains unavailable until RPE is recorded.'} />
       <SelectField label="Linked planned session" value={form.planned_session_id} onChange={(event) => set('planned_session_id', event.target.value)} hint="Links plan and actual without deleting either record."><option value="">Extra / unplanned workout</option>{form.planned_session_id && !planned.data?.items.some((session) => String(session.id) === form.planned_session_id) && <option value={form.planned_session_id}>Planned session #{form.planned_session_id}</option>}{planned.data?.items.map((session) => <option key={session.id} value={session.id}>{session.date} · {session.title}</option>)}</SelectField>
     </div>
     {form.workout_kind === 'RUNNING' && <RunningFields form={form} set={set} advanced={advanced} intervals={intervals} setIntervals={setIntervals} splits={splits} setSplits={setSplits} />}
     {form.workout_kind === 'CLIMBING' && <ClimbingFields form={form} set={set} advanced={advanced} problems={problems} setProblems={setProblems} />}
-    {form.workout_kind === 'CROSSFIT_CONDITIONING' && <div className="form-grid three"><Field label="Workout name" value={form.workout_name} onChange={(event) => set('workout_name', event.target.value)} /><Field label="Rounds" type="number" min="0" value={form.rounds} onChange={(event) => set('rounds', event.target.value)} /><Field label="Result / time" value={form.result_time} onChange={(event) => set('result_time', event.target.value)} /></div>}
+    {form.workout_kind === 'CROSSFIT_CONDITIONING' && <div className="form-grid three"><Field label="Workout name" value={form.workout_name} onChange={(event) => set('workout_name', event.target.value)} /><Field label="Rounds" type="number" min="0" value={form.rounds} onChange={(event) => set('rounds', event.target.value)} /><Field label="Result / time" inputMode="numeric" placeholder="12:34 or 1:05:01" value={form.result_time} onChange={(event) => set('result_time', event.target.value)} /></div>}
     {(form.workout_kind === 'STRENGTH' || form.workout_kind === 'CROSSFIT_CONDITIONING') && <StrengthFields exercises={exercises} setExercises={setExercises} />}
     {(form.workout_kind === 'RUNNING' || form.workout_kind === 'CLIMBING') && <Button type="button" variant="ghost" icon={advanced ? 'chevron' : 'plus'} onClick={() => setAdvanced((value) => !value)}>{advanced ? 'Hide optional detail' : 'Add splits / attempts / metrics'}</Button>}
     <TextAreaField label="Notes" rows={4} value={form.notes} onChange={(event) => set('notes', event.target.value)} placeholder="Execution, feel, conditions, pain-free observations…" />
@@ -162,10 +180,41 @@ function TextImport({ onSaved, onManual }: { onSaved: () => void; onManual: () =
   const extract = async () => { setBusy(true); setError(null); try { setResult(await api.extractWorkoutText(text)) } catch (reason) { setError(reason instanceof ApiError ? reason.message : 'Text extraction failed.') } finally { setBusy(false) } }
   if (!capabilities.text_extraction) return <div className="degraded-flow"><InlineNotice tone="warning" title="Natural-language extraction unavailable">{capabilities.reason ?? 'AI is not configured.'} Your core logger is still available.</InlineNotice><Button icon="edit" onClick={onManual}>Use manual workout form</Button></div>
   if (result) return <ExtractionPreview result={result} onBack={() => setResult(null)} onSaved={onSaved} />
-  return <div className="import-flow"><TextAreaField label="Describe the session" rows={7} value={text} onChange={(event) => setText(event.target.value)} placeholder="今天爬了两个小时，主要是 limit bouldering。整体 RPE 8。\n\nor\n\n10 km easy, 52 min, avg HR 146, RPE 3." hint="Chinese, English and mixed terminology are supported." />{error && <InlineNotice tone="warning">{error} Your text remains available to edit or copy.</InlineNotice>}<FormActions><Button disabled={!text.trim() || busy} onClick={() => void extract()}>{busy ? 'Structuring…' : 'Create preview'}</Button></FormActions></div>
+  return <div className="import-flow"><TextAreaField label="Describe the session" rows={7} value={text} onChange={(event) => setText(event.target.value)} placeholder="今天爬了两个小时，主要是 limit bouldering。整体 RPE 8。\n\nor\n\n10 km easy, 52 min, avg HR 146, RPE 3." hint="Type or dictate in Chinese, English, or mixed training vocabulary." /><QuickTextVoiceRecorder disabled={!capabilities.transcription} onTranscript={(transcript) => setText((current) => current.trim() ? `${current.trim()}\n${transcript}` : transcript)} />{error && <InlineNotice tone="warning">{error} Your text remains available to edit or copy.</InlineNotice>}<FormActions><Button disabled={!text.trim() || busy} onClick={() => void extract()}>{busy ? 'Structuring…' : 'Create preview'}</Button></FormActions></div>
 }
 
-const extractionLabels: Record<keyof WorkoutExtraction, string> = { workout_kind: 'Workout kind', activity_type: 'Activity label', session_type: 'Session type', date: 'Date', distance_km: 'Distance (km)', duration_minutes: 'Duration (minutes)', rpe: 'RPE (1–10)', average_pace: 'Average pace', average_hr: 'Average HR', max_hr: 'Max HR', elevation_m: 'Elevation (m)', cadence: 'Cadence', power_w: 'Power (W)', splits: 'Splits', intervals: 'Intervals', notes: 'Notes' }
+function QuickTextVoiceRecorder({ disabled, onTranscript }: { disabled: boolean; onTranscript: (text: string) => void }): React.JSX.Element {
+  const recorderRef = useRef<MediaRecorder | null>(null)
+  const streamRef = useRef<MediaStream | null>(null)
+  const chunksRef = useRef<Blob[]>([])
+  const [recording, setRecording] = useState(false)
+  const [audio, setAudio] = useState<Blob | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const start = async () => {
+    setError(null)
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') { setError('Audio recording is not supported in this browser.'); return }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      streamRef.current = stream; chunksRef.current = []
+      const recorder = new MediaRecorder(stream)
+      recorderRef.current = recorder
+      recorder.ondataavailable = (event) => { if (event.data.size) chunksRef.current.push(event.data) }
+      recorder.onstop = () => { setAudio(new Blob(chunksRef.current, { type: recorder.mimeType || 'audio/webm' })); stream.getTracks().forEach((track) => track.stop()); streamRef.current = null }
+      recorder.start(); setRecording(true)
+    } catch { setError('Microphone access was denied or unavailable.') }
+  }
+  const stop = () => { recorderRef.current?.stop(); recorderRef.current = null; setRecording(false) }
+  const remove = () => { if (recording) stop(); setAudio(null); setError(null) }
+  const transcribe = async () => {
+    if (!audio) return
+    setBusy(true); setError(null)
+    try { const result = await api.transcribeWorkoutInput(audio); onTranscript(result.transcript); setAudio(null) } catch (reason) { setError(reason instanceof ApiError ? reason.message : 'Unable to transcribe this recording.') } finally { setBusy(false) }
+  }
+  return <Card className="quick-text-voice" title="Voice input"><p className="muted">Optional. The transcript is inserted above for editing before extraction.</p><div className="button-row">{recording ? <Button variant="danger" onClick={stop}>Stop</Button> : <Button icon="mic" disabled={disabled || busy} onClick={() => void start()}>{audio ? 'Re-record' : 'Record'}</Button>}{audio && <Button disabled={busy} onClick={() => void transcribe()}>{busy ? 'Transcribing…' : 'Insert transcript'}</Button>}{audio && <Button variant="ghost" disabled={busy} onClick={remove}>Delete recording</Button>}</div>{disabled && <InlineNotice title="Voice input unavailable">Configure the backend OpenAI API key to enable transcription.</InlineNotice>}{error && <InlineNotice tone="warning">{error}</InlineNotice>}</Card>
+}
+
+const extractionLabels: Record<keyof WorkoutExtraction, string> = { workout_kind: 'Workout kind', activity_type: 'Activity label', session_type: 'Session type', date: 'Date', distance_km: 'Distance (km)', duration_minutes: 'Duration', rpe: 'RPE (1–10)', average_pace: 'Average pace', average_hr: 'Average HR', max_hr: 'Max HR', elevation_m: 'Elevation (m)', cadence: 'Cadence', power_w: 'Power (W)', splits: 'Splits', intervals: 'Intervals', notes: 'Notes' }
 
 function missingField<T>(source = 'not detected'): ExtractionField<T | null> { return { value: null, confidence: 'LOW', source } }
 
@@ -181,6 +230,25 @@ function normaliseExtraction(result: WorkoutExtraction): WorkoutExtraction {
   }
 }
 
+function extractionInputProps(key: keyof WorkoutExtraction): { type?: string; min?: number; max?: number; step?: number | string } {
+  if (key === 'date') return { type: 'date' }
+  if (key === 'duration_minutes') return { type: 'text' }
+  if (['distance_km', 'rpe', 'average_hr', 'max_hr', 'elevation_m', 'cadence', 'power_w'].includes(key)) {
+    return { type: 'number', min: key === 'elevation_m' ? undefined : key === 'rpe' ? 1 : 0, max: key === 'rpe' ? 10 : undefined, step: ['average_hr', 'max_hr'].includes(key) ? 1 : 'any' }
+  }
+  return { type: 'text' }
+}
+
+function isIsoDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const parsed = new Date(`${value}T00:00:00Z`)
+  return !Number.isNaN(parsed.valueOf()) && parsed.toISOString().slice(0, 10) === value
+}
+
+function isPace(value: string): boolean {
+  return /^\d{1,3}:\d{2}(?:\.\d+)?(?:\s*\/km)?$/i.test(value.trim()) || /^\d+(?:\.\d+)?$/.test(value.trim())
+}
+
 function resolveWorkoutKind(explicit: unknown, activity: unknown, sessionType: unknown): WorkoutKind | null {
   const exact = String(explicit ?? '').toUpperCase().replaceAll(' ', '_')
   if (['RUNNING', 'CLIMBING', 'STRENGTH', 'CROSSFIT_CONDITIONING', 'MOBILITY_RECOVERY'].includes(exact)) return exact as WorkoutKind
@@ -194,7 +262,8 @@ function resolveWorkoutKind(explicit: unknown, activity: unknown, sessionType: u
 }
 
 function ExtractionPreview({ result, onBack, onSaved }: { result: WorkoutExtraction; onBack: () => void; onSaved: () => void }): React.JSX.Element {
-  const [fields, setFields] = useState(() => normaliseExtraction(result)); const [busy, setBusy] = useState(false); const [error, setError] = useState<string | null>(null)
+  const [fields, setFields] = useState(() => normaliseExtraction(result)); const [busy, setBusy] = useState(false); const [error, setError] = useState<string | null>(null); const [feedbackText, setFeedbackText] = useState(''); const [feedbackSource, setFeedbackSource] = useState<'VOICE' | 'TEXT' | 'NONE'>('NONE')
+  const [durationText, setDurationText] = useState(() => typeof result.duration_minutes?.value === 'number' ? formatDuration(result.duration_minutes.value) : '')
   const entries = Object.entries(fields) as [keyof WorkoutExtraction, ExtractionField<unknown>][]
   const update = (key: keyof WorkoutExtraction, rawValue: string) => setFields((current) => {
     const numeric = ['distance_km', 'duration_minutes', 'rpe', 'average_hr', 'max_hr', 'elevation_m', 'cadence', 'power_w'].includes(key)
@@ -206,17 +275,58 @@ function ExtractionPreview({ result, onBack, onSaved }: { result: WorkoutExtract
     setError(null)
     const value = <T,>(key: keyof WorkoutExtraction) => (fields[key] as ExtractionField<T> | undefined)?.value
     const workoutKind = resolveWorkoutKind(value('workout_kind'), value('activity_type'), value('session_type'))
-    const duration = value<number>('duration_minutes')
+    const duration = parseDurationInput(durationText)
     const rpe = value<number>('rpe')
+    const sessionDate = value<string>('date') ?? localIsoDate()
+    const averageHr = value<number>('average_hr')
+    const maxHr = value<number>('max_hr')
+    const averagePace = value<string>('average_pace')
     if (!workoutKind) { setError('Choose a valid workout kind before saving.'); return }
-    if (!duration || duration <= 0) { setError('Duration is required before saving an imported workout.'); return }
+    if (!isIsoDate(sessionDate)) { setError('Date must use YYYY-MM-DD format.'); return }
+    if (duration == null || duration <= 0) { setError('Duration must use minutes, M:SS, or H:MM:SS.'); return }
     if (rpe != null && (rpe < 1 || rpe > 10)) { setError('When present, RPE must be between 1 and 10.'); return }
+    if ((averageHr != null && !Number.isInteger(averageHr)) || (maxHr != null && !Number.isInteger(maxHr))) { setError('Heart-rate values must be whole bpm numbers.'); return }
+    if (averagePace && !isPace(averagePace)) { setError('Average pace must use M:SS /km format, for example 5:20 /km.'); return }
     setBusy(true)
     const splits = value<string[]>('splits') ?? []
     const intervals = value<string[]>('intervals') ?? []
-    try { await api.createCompletedSession({ date: value<string>('date') ?? localIsoDate(), workout_kind: workoutKind, session_type: value<string>('session_type') ?? value<string>('activity_type') ?? 'Imported workout', duration_minutes: duration, rpe, distance_km: value<number>('distance_km'), average_pace: value<string>('average_pace'), average_hr: value<number>('average_hr'), max_hr: value<number>('max_hr'), elevation_m: value<number>('elevation_m'), cadence: value<number>('cadence'), power_w: value<number>('power_w'), splits: splits.map((description) => ({ description })), interval_blocks: intervals.map((description) => ({ description })), notes: value<string>('notes'), extraction_reviewed: true, extraction_fields: fields }); onSaved() } catch (reason) { setError(reason instanceof ApiError ? reason.message : 'Unable to confirm workout.') } finally { setBusy(false) }
+    const reviewedFields: WorkoutExtraction = { ...fields, duration_minutes: { ...fields.duration_minutes, value: duration } }
+    try { await api.createCompletedSession({ date: sessionDate, workout_kind: workoutKind, session_type: value<string>('session_type') ?? value<string>('activity_type') ?? 'Imported workout', duration_minutes: duration, rpe, distance_km: value<number>('distance_km'), average_pace: averagePace, average_hr: averageHr, max_hr: maxHr, elevation_m: value<number>('elevation_m'), cadence: value<number>('cadence'), power_w: value<number>('power_w'), splits: splits.map((description) => ({ description })), interval_blocks: intervals.map((description) => ({ description })), notes: value<string>('notes'), extraction_reviewed: true, extraction_fields: reviewedFields, subjective_feedback_text: feedbackText.trim() || null, subjective_feedback_source: feedbackText.trim() ? feedbackSource === 'NONE' ? 'TEXT' : feedbackSource : 'NONE' }); onSaved() } catch (reason) { setError(reason instanceof ApiError ? reason.message : 'Unable to confirm workout.') } finally { setBusy(false) }
   }
-  return <div className="preview-flow"><InlineNotice title="Review every field">Unknown values remain null. Correct anything before confirming; separate splits or intervals with semicolons. Nothing has been saved yet.</InlineNotice><div className="extraction-table"><div className="extraction-row head"><span>Field</span><span>Extracted value</span><span>Confidence</span><span>Source</span></div>{entries.map(([key, field]) => <div className="extraction-row" key={key}><strong>{extractionLabels[key]}</strong><input aria-label={extractionLabels[key]} value={extractionDisplayValue(field.value)} placeholder="Not detected" onChange={(event) => update(key, event.target.value)} /><ConfidencePill value={field.confidence} /><span>{field.source}</span></div>)}</div>{error && <InlineNotice tone="warning">{error}</InlineNotice>}<FormActions><Button variant="ghost" onClick={onBack}>Back</Button><Button disabled={busy} onClick={() => void confirm()}>{busy ? 'Saving…' : 'Confirm and save'}</Button></FormActions></div>
+  const workoutKind = resolveWorkoutKind(fields.workout_kind?.value, fields.activity_type?.value, fields.session_type?.value)
+  return <div className="preview-flow"><InlineNotice title="Review every field">Dates use YYYY-MM-DD, duration uses M:SS or H:MM:SS, pace uses M:SS /km, and heart rate uses whole bpm. A plain duration number is treated as minutes. Unknown values remain blank. Correct anything before confirming; separate splits or intervals with semicolons.</InlineNotice><div className="extraction-table"><div className="extraction-row head"><span>Field</span><span>Extracted value</span><span>Confidence</span><span>Source</span></div>{entries.map(([key, field]) => <div className="extraction-row" key={key}><strong>{extractionLabels[key]}</strong><input aria-label={extractionLabels[key]} {...extractionInputProps(key)} inputMode={key === 'duration_minutes' ? 'numeric' : undefined} value={key === 'duration_minutes' ? durationText : extractionDisplayValue(field.value)} placeholder={key === 'duration_minutes' ? '45:00 or 1:05:01' : 'Not detected'} onChange={(event) => key === 'duration_minutes' ? setDurationText(event.target.value) : update(key, event.target.value)} /><ConfidencePill value={field.confidence} /><span>{field.source}</span></div>)}</div>{workoutKind === 'RUNNING' && <RunningFeedbackRecorder text={feedbackText} source={feedbackSource} onChange={(text, source) => { setFeedbackText(text); setFeedbackSource(source) }} />}{error && <InlineNotice tone="warning">{error}</InlineNotice>}<FormActions><Button variant="ghost" onClick={onBack}>Back</Button><Button disabled={busy} onClick={() => void confirm()}>{busy ? 'Saving…' : 'Save workout'}</Button></FormActions></div>
+}
+
+function RunningFeedbackRecorder({ text, source, onChange }: { text: string; source: 'VOICE' | 'TEXT' | 'NONE'; onChange: (text: string, source: 'VOICE' | 'TEXT' | 'NONE') => void }): React.JSX.Element {
+  const { capabilities } = useCapabilities()
+  const recorderRef = useRef<MediaRecorder | null>(null)
+  const streamRef = useRef<MediaStream | null>(null)
+  const chunksRef = useRef<Blob[]>([])
+  const [recording, setRecording] = useState(false)
+  const [audio, setAudio] = useState<Blob | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const start = async () => {
+    setError(null)
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') { setError('Audio recording is not supported in this browser.'); return }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      streamRef.current = stream; chunksRef.current = []
+      const recorder = new MediaRecorder(stream)
+      recorderRef.current = recorder
+      recorder.ondataavailable = (event) => { if (event.data.size) chunksRef.current.push(event.data) }
+      recorder.onstop = () => { setAudio(new Blob(chunksRef.current, { type: recorder.mimeType || 'audio/webm' })); stream.getTracks().forEach((track) => track.stop()); streamRef.current = null }
+      recorder.start(); setRecording(true)
+    } catch { setError('Microphone access was denied or unavailable.') }
+  }
+  const stop = () => { recorderRef.current?.stop(); recorderRef.current = null; setRecording(false) }
+  const remove = () => { if (recording) stop(); setAudio(null); onChange('', 'NONE'); setError(null) }
+  const transcribe = async () => {
+    if (!audio) return
+    setBusy(true); setError(null)
+    try { const result = await api.transcribeRunningFeedback(audio); onChange(result.transcript, 'VOICE'); setAudio(null) } catch (reason) { setError(reason instanceof ApiError ? reason.message : 'Unable to transcribe this recording.') } finally { setBusy(false) }
+  }
+  return <Card className="running-feedback-card" title="How did this run feel?"><p className="muted">Optional. Record a short note, review the transcript, or type directly. Saving the workout does not require feedback.</p><div className="button-row">{recording ? <Button variant="danger" onClick={stop}>Stop</Button> : <Button icon="mic" disabled={!capabilities.transcription} onClick={() => void start()}>{audio || source === 'VOICE' ? 'Re-record' : 'Record'}</Button>}{audio && <Button disabled={busy} onClick={() => void transcribe()}>{busy ? 'Transcribing…' : 'Transcribe'}</Button>}{(audio || text) && <Button variant="ghost" onClick={remove}>Delete</Button>}</div>{!capabilities.transcription && <InlineNotice title="Voice transcription unavailable">You can still type feedback below or save without it.</InlineNotice>}{error && <InlineNotice tone="warning">{error} Your workout has not been saved yet.</InlineNotice>}<TextAreaField label="Transcript" rows={5} value={text} onChange={(event) => onChange(event.target.value, event.target.value.trim() ? source === 'VOICE' ? 'VOICE' : 'TEXT' : 'NONE')} placeholder="前半程很輕鬆；第六公里後腿有點沉。RPE 大約 7。" hint="Editable text is the source of truth. Raw audio is not retained after successful transcription." /></Card>
 }
 
 function extractionDisplayValue(value: unknown): string | number {

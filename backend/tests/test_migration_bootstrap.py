@@ -21,7 +21,7 @@ from app.migration_bootstrap import (
 )
 from app.services.core import initialize_defaults
 
-ALEMBIC_HEAD = "38c5cea16feb"
+ALEMBIC_HEAD = "f3a6d2e91b74"
 
 
 def _new_current_database(path: Path) -> sa.Engine:

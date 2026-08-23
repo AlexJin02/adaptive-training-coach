@@ -282,7 +282,33 @@ def progress_data(db: Session, range_name: str, today: date | None = None) -> di
     }
 
 
-def generate_weekly_review(db: Session, week_start: date) -> models.WeeklyReview:
+def build_running_subjective_feedback_summary(
+    sessions: list[models.CompletedSession], *, max_chars: int = 240
+) -> list[dict[str, Any]]:
+    """Compact edited feedback for weekly decisions without another model call."""
+
+    result: list[dict[str, Any]] = []
+    for item in sorted(sessions, key=lambda row: (row.session_date, row.id)):
+        if item.sport != Sport.RUNNING or not item.subjective_feedback_text:
+            continue
+        compact = " ".join(item.subjective_feedback_text.split())
+        if len(compact) > max_chars:
+            compact = compact[: max_chars - 1].rstrip() + "…"
+        result.append(
+            {
+                "date": item.session_date.isoformat(),
+                "session_type": item.workout_type,
+                "feedback": compact,
+                "source": item.subjective_feedback_source,
+                "rpe": item.rpe,
+            }
+        )
+    return result
+
+
+def generate_weekly_review(
+    db: Session, week_start: date, *, include_ai: bool = True
+) -> models.WeeklyReview:
     week_end = week_start + timedelta(days=6)
     sessions = [
         item
@@ -337,6 +363,7 @@ def generate_weekly_review(db: Session, week_start: date) -> models.WeeklyReview
         "climbing_minutes": round(climbing_minutes, 1),
         "strength_sessions": strength_count,
         "rest_days": 7 - len(trained_days),
+        "running_subjective_feedback": build_running_subjective_feedback_summary(sessions),
     }
     running = [f"Weekly mileage: {running_distance:.1f} km"]
     if quality:
@@ -461,7 +488,7 @@ def generate_weekly_review(db: Session, week_start: date) -> models.WeeklyReview
         db.add(existing)
     source = "RULE_ENGINE"
     narrative = " ".join(findings)
-    if get_settings().openai_api_key:
+    if include_ai and get_settings().openai_api_key:
         profile = core.get_profile(db)
         goals = list(db.scalars(select(models.Goal).where(models.Goal.is_current.is_(True))))
         previous = db.scalar(

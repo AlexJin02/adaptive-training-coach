@@ -19,6 +19,8 @@ SQLite is the local source of truth. The normal development URL resolves to
   local start time, not a separate UTC start instant.
 - Durations and distances are stored as minutes and kilometres. Pace uses seconds per kilometre,
   elevation metres, power watts, and strength load kilograms.
+- The frontend presents duration and race-time values as `M:SS` or `H:MM:SS` and converts those
+  inputs at the API boundary; SQLite retains the established numeric minute/second units.
 - Nullable evidence remains SQL `NULL`; zero is not substituted for an unknown measurement.
 - Completed-session RPE is nullable and otherwise constrained to 1–10.
 - Enum values are stored as strings and validated through application/SQLAlchemy types. Numeric
@@ -71,8 +73,10 @@ Status is `PLANNED`, `COMPLETED`, `MODIFIED`, `SKIPPED`, `MOVED`, `REPLACED`, or
 
 Common evidence is athlete, optional plan link, local date/start time, duration minutes, sport,
 workout type, nullable RPE, notes, nullable sRPE/base stress, optional AI analysis, demo flag, and
-timestamps. The current public API creates and lists completed sessions; it does not expose edit
-or delete endpoints.
+timestamps. The public API creates, lists, and permanently deletes completed sessions. Deletion
+requires an explicit irreversible UI confirmation, removes sport-specific child evidence, and
+rebuilds derived running estimates. A linked planned session returns to `PLANNED` when no other
+completion remains; adaptation audit rows are detached from the removed trigger.
 
 Sport-specific detail is stored as follows:
 

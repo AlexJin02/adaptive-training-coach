@@ -17,7 +17,7 @@ describe('workout import degradation', () => {
     expect(await screen.findByText('Screenshot extraction unavailable')).toBeInTheDocument()
     expect(screen.getByText(/No OpenAI API key/i)).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Use manual workout form' }))
-    expect(screen.getByLabelText('Duration (minutes)')).toHaveValue(45)
+    expect(screen.getByLabelText(/^Duration/)).toHaveValue('45:00')
     expect(screen.getByLabelText(/RPE \(1–10\)/)).toHaveValue(3)
   })
 
@@ -54,8 +54,10 @@ describe('workout import degradation', () => {
     await user.type(await screen.findByLabelText(/Describe the session/), 'Limit bouldering for two hours, RPE 8.')
     await user.click(screen.getByRole('button', { name: 'Create preview' }))
     expect(await screen.findByText('Review every field')).toBeInTheDocument()
-    expect(screen.getByLabelText('RPE (1–10)')).toHaveValue('8')
-    await user.click(screen.getByRole('button', { name: 'Confirm and save' }))
+    expect(screen.getByLabelText('RPE (1–10)')).toHaveValue(8)
+    expect(screen.getByLabelText(/^Duration/)).toHaveValue('2:00:00')
+    expect(screen.getByLabelText('Date')).toHaveAttribute('type', 'date')
+    await user.click(screen.getByRole('button', { name: 'Save workout' }))
     const post = mock.mock.calls.find(([input, init]) => String(input).includes('/completed-sessions') && init?.method === 'POST')
     expect(post).toBeDefined()
     const payload = JSON.parse(String(post?.[1]?.body)) as Record<string, unknown>
@@ -86,7 +88,7 @@ describe('workout import degradation', () => {
     await waitFor(() => expect(mock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(true))
     const post = mock.mock.calls.find(([, init]) => init?.method === 'POST')
     const payload = JSON.parse(String(post?.[1]?.body)) as Record<string, unknown>
-    expect(payload).toMatchObject({ workout_kind: 'CROSSFIT_CONDITIONING', workout_name: 'Fran', rounds: 3, result_time: '12:34' })
+    expect(payload).toMatchObject({ workout_kind: 'CROSSFIT_CONDITIONING', workout_name: 'Fran', rounds: 3, result_time: '12:34', duration_minutes: 45 })
     expect(payload.strength_sets).toEqual([{ exercise: 'deadlift', sets: '3', reps: '10', load: '60', rpe: '7', rir: '' }])
   })
 
@@ -96,6 +98,7 @@ describe('workout import degradation', () => {
       workout_name: 'Engine test', rounds: 4, result_time_seconds: 754,
       splits: [{ distance_km: 1, time: '4:15' }], interval_blocks: [{ phase: 'Main', detail: '4 × 1 km' }],
       climbing_attempts: [{ problem: 'Blue 7', grade: 'V7', attempts: 3 }], strength_sets: [{ exercise: 'deadlift', reps: 5, load_kg: 100 }],
+      ai_analysis: { execution_summary: 'x'.repeat(250), confidence: 'LOW' },
     }
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ items: [session] }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
     const user = userEvent.setup()
@@ -110,6 +113,24 @@ describe('workout import degradation', () => {
     expect(detail.getByText('Climbing attempts')).toBeInTheDocument()
     expect(detail.getByText('Strength sets')).toBeInTheDocument()
     expect(detail.getByText(/exercise: deadlift/)).toBeInTheDocument()
+    const analysis = detail.getByText((content, element) => element?.tagName === 'P' && content.startsWith('x'))
+    expect([...(analysis.textContent ?? '')]).toHaveLength(200)
+    expect(analysis).toHaveTextContent(/…$/)
+  })
+
+  it('requires irreversible confirmation before deleting a workout', async () => {
+    const session = { id: 7, date: '2026-08-23', workout_kind: 'RUNNING', session_type: 'Easy', duration_minutes: 45, rpe: 3, srpe_load: 135 }
+    const mock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => new Response(JSON.stringify(init?.method === 'DELETE' ? { deleted: true, id: 7 } : { items: [session] }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', mock)
+    const user = userEvent.setup()
+    render(<MemoryRouter><WorkoutLogPage /></MemoryRouter>)
+
+    await user.click(await screen.findByRole('button', { name: 'View Easy' }))
+    await user.click(screen.getByRole('button', { name: 'Delete workout' }))
+    expect(mock.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(false)
+    expect(screen.getByText(/cannot be undone/i)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Delete permanently' }))
+    await waitFor(() => expect(mock.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(true))
   })
 })
 

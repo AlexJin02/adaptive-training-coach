@@ -3,13 +3,15 @@ from __future__ import annotations
 import base64
 import json
 import re
+from datetime import date, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.config import Settings, get_settings
-from app.enums import AdaptationAction, Confidence, NoteCategory
+from app.enums import AdaptationAction, Confidence, NoteCategory, SessionPriority, Sport
 
 
 class AIUnavailableError(RuntimeError):
@@ -45,6 +47,93 @@ class WorkoutExtraction(BaseModel):
     notes: ExtractedValue
 
 
+def _mark_invalid(field: ExtractedValue, label: str) -> None:
+    field.value = None
+    field.confidence = Confidence.LOW
+    field.source = f"{field.source}; {label} could not be normalised"
+
+
+def _normalise_extracted_date(field: ExtractedValue, reference_date: date) -> None:
+    if field.value is None:
+        return
+    raw = str(field.value).strip()
+    lowered = raw.casefold()
+    relative_days = {
+        "today": 0,
+        "今天": 0,
+        "今日": 0,
+        "yesterday": -1,
+        "昨天": -1,
+        "昨日": -1,
+    }
+    parsed: date | None = None
+    if lowered in relative_days:
+        parsed = reference_date + timedelta(days=relative_days[lowered])
+    else:
+        full = re.fullmatch(r"(\d{4})[年/.-](\d{1,2})[月/.-](\d{1,2})日?", raw)
+        month_day = re.fullmatch(r"(\d{1,2})月(\d{1,2})日?", raw)
+        try:
+            if full:
+                parsed = date(int(full.group(1)), int(full.group(2)), int(full.group(3)))
+            elif month_day:
+                parsed = date(reference_date.year, int(month_day.group(1)), int(month_day.group(2)))
+            else:
+                parsed = date.fromisoformat(raw)
+        except ValueError:
+            parsed = None
+    if parsed is None:
+        _mark_invalid(field, "date")
+        return
+    field.value = parsed.isoformat()
+
+
+def _normalise_extracted_pace(field: ExtractedValue) -> None:
+    if field.value is None:
+        return
+    raw = str(field.value).strip()
+    match = re.search(
+        r"(?P<minutes>\d{1,2})\s*(?:[:：分'′])\s*(?P<seconds>\d{1,2}(?:\.\d+)?)",
+        raw,
+    )
+    if match:
+        seconds = round(float(match.group("seconds")))
+        minutes = int(match.group("minutes")) + seconds // 60
+        field.value = f"{minutes}:{seconds % 60:02d}"
+        return
+    try:
+        seconds_per_km = float(raw.replace("/km", "").strip())
+    except ValueError:
+        _mark_invalid(field, "pace")
+        return
+    if seconds_per_km <= 0:
+        _mark_invalid(field, "pace")
+        return
+    field.value = str(round(seconds_per_km, 1)).removesuffix(".0")
+
+
+def normalise_workout_extraction(
+    extraction: WorkoutExtraction, *, reference_date: date
+) -> WorkoutExtraction:
+    """Convert AI preview values into the API's stable athlete-facing formats."""
+
+    _normalise_extracted_date(extraction.date, reference_date)
+    _normalise_extracted_pace(extraction.average_pace)
+    for name in ("distance_km", "duration_minutes", "cadence", "power_w"):
+        field = getattr(extraction, name)
+        if field.value is not None and float(field.value) <= 0:
+            _mark_invalid(field, name)
+    if extraction.rpe.value is not None and not 1 <= float(extraction.rpe.value) <= 10:
+        _mark_invalid(extraction.rpe, "RPE")
+    for name in ("average_hr", "max_hr"):
+        field = getattr(extraction, name)
+        if field.value is not None:
+            if float(field.value) <= 0:
+                _mark_invalid(field, name)
+            else:
+                field.value = round(float(field.value))
+    return extraction
+
+
 class ProcessedNote(StrictAIOutput):
     primary_category: NoteCategory
     title: str
@@ -67,11 +156,7 @@ class SessionAnalysisInput(BaseModel):
 
 
 class SessionAnalysisOutput(StrictAIOutput):
-    execution_summary: str
-    planned_vs_actual: list[str]
-    strong_execution: bool
-    unexpected_fatigue: bool
-    evidence: list[str]
+    summary: str = Field(min_length=1, max_length=200)
     confidence: Confidence
 
 
@@ -124,6 +209,110 @@ class WeeklyReviewOutput(StrictAIOutput):
     key_findings: list[str]
     next_week: list[str]
     confidence: Confidence
+
+
+class WeeklyPlanningContext(BaseModel):
+    long_term_goals: list[dict[str, Any]]
+    long_term_summary: dict[str, Any]
+    athlete_state: dict[str, Any]
+    phases: dict[str, str]
+    this_week_summary: dict[str, Any]
+    previous_weekly_summaries: list[dict[str, Any]]
+    current_monthly_block: dict[str, Any] | None
+    load: dict[str, Any]
+    readiness: dict[str, Any]
+    recent_recovery: list[dict[str, Any]]
+    upcoming_availability: list[dict[str, Any]]
+    locked_sessions: list[dict[str, Any]]
+    running_subjective_feedback: list[dict[str, Any]]
+
+
+class StructuredBlockProposal(StrictAIOutput):
+    phase: str | None
+    description: str | None
+    exercise: str | None
+
+
+class PlannedSessionProposal(StrictAIOutput):
+    date: str
+    start_time: str | None
+    workout_kind: Sport
+    session_type: str
+    title: str
+    description: str
+    planned_duration_minutes: float | None
+    planned_distance_km: float | None
+    target_rpe: float | None
+    priority: SessionPriority
+    structured_blocks: list[StructuredBlockProposal]
+
+
+class WeeklyPlanReview(StrictAIOutput):
+    summary: str
+    running_analysis: str
+    climbing_analysis: str
+    recovery_analysis: str
+    key_findings: list[str]
+
+
+class NextWeekPlan(StrictAIOutput):
+    summary: str
+    running_target_km: float
+    running_objectives: list[str]
+    climbing_objectives: list[str]
+    sessions: list[PlannedSessionProposal]
+    warnings: list[str]
+
+
+class WeeklyReviewPlanOutput(StrictAIOutput):
+    review: WeeklyPlanReview
+    next_week: NextWeekPlan
+
+
+class MonthlyPlanningContext(BaseModel):
+    long_term_goals: list[dict[str, Any]]
+    long_term_summary: dict[str, Any]
+    athlete_state: dict[str, Any]
+    phases: dict[str, str]
+    current_month_summary: dict[str, Any]
+    previous_monthly_summaries: list[dict[str, Any]]
+    recent_weekly_summaries: list[dict[str, Any]]
+    running_volume_progression: dict[str, Any]
+    running_performance_progression: dict[str, Any]
+    climbing_benchmark_progression: dict[str, Any]
+    readiness_fatigue_trend: dict[str, Any]
+    known_future_constraints: list[dict[str, Any]]
+    locked_events: list[dict[str, Any]]
+
+
+class MonthlyPlanReview(StrictAIOutput):
+    summary: str
+    running_analysis: str
+    climbing_analysis: str
+    recovery_analysis: str
+    goal_progress: str
+    key_findings: list[str]
+
+
+class NextMonthBlock(StrictAIOutput):
+    running_phase: str
+    climbing_phase: str
+    running_objectives: list[str]
+    climbing_objectives: list[str]
+    weekly_running_volume_targets: list[float]
+    quality_session_guidance: str
+    long_run_guidance: str
+    climbing_frequency_guidance: str
+    climbing_focus: list[str]
+    supporting_strength_guidance: str
+    progression_criteria: list[str]
+    hold_criteria: list[str]
+    deload_criteria: list[str]
+
+
+class MonthlyReviewPlanOutput(StrictAIOutput):
+    review: MonthlyPlanReview
+    next_month_block: NextMonthBlock
 
 
 WORKOUT_FIELDS = (
@@ -259,24 +448,33 @@ def _workout_schema() -> dict[str, Any]:
     }
 
 
-def extract_workout_from_text(text: str) -> WorkoutExtraction:
+def extract_workout_from_text(
+    text: str, *, reference_date: date | None = None
+) -> WorkoutExtraction:
     settings = get_settings()
+    local_date = reference_date or datetime.now(ZoneInfo(settings.athlete_timezone)).date()
     data = _responses_json(
         system=(
             "Extract only workout facts explicitly present in the user's text. "
             "Every field is {value, confidence, source}; unseen values must be null. "
-            "Do not infer physiology or fabricate measurements. The output is a preview, never a save."
+            f"The athlete's current local date is {local_date.isoformat()}; resolve only explicit "
+            "relative dates such as today or yesterday. Return date as YYYY-MM-DD, duration_minutes "
+            "as total minutes, average_pace as M:SS per km, heart rates as whole bpm, and RPE as a "
+            "number from 1 to 10. Do not infer physiology or fabricate measurements. The output is "
+            "a preview, never a save."
         ),
         user_content=[{"type": "input_text", "text": text}],
         schema_name="workout_extraction",
         schema=_workout_schema(),
         model=settings.openai_model,
     )
-    return _validate_provider_output(WorkoutExtraction, data)
+    extraction = _validate_provider_output(WorkoutExtraction, data)
+    return normalise_workout_extraction(extraction, reference_date=local_date)
 
 
 def extract_workout_from_image(image: bytes, media_type: str) -> WorkoutExtraction:
     settings = get_settings()
+    local_date = datetime.now(ZoneInfo(settings.athlete_timezone)).date()
     encoded = base64.b64encode(image).decode("ascii")
     data = _responses_json(
         system=(
@@ -292,7 +490,8 @@ def extract_workout_from_image(image: bytes, media_type: str) -> WorkoutExtracti
         schema=_workout_schema(),
         model=settings.openai_vision_model,
     )
-    return _validate_provider_output(WorkoutExtraction, data)
+    extraction = _validate_provider_output(WorkoutExtraction, data)
+    return normalise_workout_extraction(extraction, reference_date=local_date)
 
 
 def transcribe_training_note(audio: bytes, filename: str, media_type: str) -> str:
@@ -382,7 +581,12 @@ def analyse_completed_session(
     except ValidationError as exc:
         raise AIUnavailableError("Session-analysis context failed schema validation.") from exc
     return _typed_coaching_call(
-        "Analyse execution against the planned session using evidence only. Never invent data.",
+        (
+            "Write one concise athlete-facing analysis of this completed session using evidence "
+            "only. The summary must be no more than 200 Unicode characters including spaces. "
+            "Mention only the most useful planned-versus-actual or recovery point; do not repeat "
+            "the raw workout, fatigue, or readiness payload and never invent data."
+        ),
         validated,
         SessionAnalysisOutput,
         "session_analysis",
@@ -419,6 +623,86 @@ def generate_weekly_review(
         WeeklyReviewOutput,
         "weekly_review",
     )
+
+
+def review_and_plan_week(
+    context: WeeklyPlanningContext | dict[str, Any],
+) -> WeeklyReviewPlanOutput:
+    try:
+        validated = WeeklyPlanningContext.model_validate(context)
+    except ValidationError as exc:
+        raise AIUnavailableError("Weekly planning context failed schema validation.") from exc
+    return _typed_planner_call(
+        (
+            "Review the completed week and propose the next seven days. Use only supplied "
+            "evidence. Treat subjective feedback as context, not objective measurement. Preserve "
+            "locked sessions, do not invent missing values, and return a compact practical plan."
+        ),
+        validated,
+        WeeklyReviewPlanOutput,
+        "weekly_review_and_plan",
+    )
+
+
+def review_and_plan_month(
+    context: MonthlyPlanningContext | dict[str, Any],
+) -> MonthlyReviewPlanOutput:
+    try:
+        validated = MonthlyPlanningContext.model_validate(context)
+    except ValidationError as exc:
+        raise AIUnavailableError("Monthly planning context failed schema validation.") from exc
+    return _typed_planner_call(
+        (
+            "Review the completed month and propose one next-month training block, not 30 daily "
+            "workouts. Use weekly and monthly aggregates only. Never request or infer raw "
+            "per-workout voice transcripts and do not claim to change athlete phases directly."
+        ),
+        validated,
+        MonthlyReviewPlanOutput,
+        "monthly_review_and_plan",
+    )
+
+
+def _typed_planner_call(
+    system: str,
+    context: BaseModel,
+    output_type: type[BaseModel],
+    name: str,
+) -> Any:
+    settings = get_settings()
+    data = _responses_json(
+        system=system,
+        user_content=[{"type": "input_text", "text": context.model_dump_json()}],
+        schema_name=name,
+        schema=output_type.model_json_schema(),
+        model=settings.openai_planner_model,
+    )
+    return _validate_provider_output(output_type, data)
+
+
+def transcribe_running_feedback(audio: bytes, filename: str, media_type: str) -> str:
+    settings = get_settings()
+    key = _require_key(settings)
+    prompt = (
+        "Post-run subjective feedback in Chinese, English, or mixed language. Preserve training "
+        "terms: easy run, threshold, tempo, interval, VO2, LT1, LT2, RPE, heart rate, pace, "
+        "long run, strides. Transcribe faithfully; do not analyse or add advice."
+    )
+    try:
+        response = httpx.post(
+            "https://api.openai.com/v1/audio/transcriptions",
+            headers={"Authorization": f"Bearer {key}"},
+            data={"model": settings.openai_transcribe_model, "prompt": prompt},
+            files={"file": (filename, audio, media_type)},
+            timeout=90,
+        )
+        response.raise_for_status()
+        transcript = response.json().get("text")
+    except (httpx.HTTPError, ValueError) as exc:
+        raise AIUnavailableError(f"Transcription failed: {exc}") from exc
+    if not transcript:
+        raise AIUnavailableError("Transcription returned no text.")
+    return str(transcript)
 
 
 def _typed_coaching_call(

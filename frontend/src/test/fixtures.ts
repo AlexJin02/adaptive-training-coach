@@ -10,6 +10,7 @@ export const capabilitiesOff: ApiCapabilities = {
   ai_session_analysis: false,
   ai_adaptation: false,
   ai_weekly_review: false,
+  ai_planner: false,
   reason: 'No OpenAI API key is configured.',
 }
 

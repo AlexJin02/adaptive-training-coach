@@ -21,7 +21,8 @@ export function App(): React.JSX.Element {
       <Route path="progress" element={<ProgressPage />} />
       <Route path="workouts" element={<WorkoutLogPage />} />
       <Route path="notes" element={<TrainingNotesPage />} />
-      <Route path="weekly-review" element={<WeeklyReviewPage />} />
+      <Route path="review-plan" element={<WeeklyReviewPage />} />
+      <Route path="weekly-review" element={<Navigate to="/review-plan" replace />} />
       <Route path="settings" element={<SettingsPage />} />
       <Route path="*" element={<Navigate to="/today" replace />} />
     </Route>

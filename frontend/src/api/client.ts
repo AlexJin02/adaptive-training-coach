@@ -11,6 +11,7 @@ import type {
   Goal,
   GymSet,
   PlannedSession,
+  ReviewPlanProposal,
   ProgressData,
   ReadinessSummary,
   RecoveryCheckIn,
@@ -22,7 +23,9 @@ import type {
   WorkoutExtraction,
 } from '../types'
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? '/api/v1').replace(/\/$/, '')
+// Production is always served by FastAPI as a one-origin app (including Tailscale phone access).
+// Only Vite development may point directly at the local backend.
+const API_BASE = (import.meta.env.PROD ? '/api/v1' : import.meta.env.VITE_API_BASE_URL ?? '/api/v1').replace(/\/$/, '')
 
 export class ApiError extends Error {
   readonly status: number
@@ -63,7 +66,16 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       } catch {
         details = {}
       }
-      const message = typeof details.detail === 'string' ? details.detail : typeof details.message === 'string' ? details.message : `Request failed (${response.status})`
+      const validationDetail = Array.isArray(details.detail)
+        ? details.detail.map((item) => {
+          if (!item || typeof item !== 'object') return null
+          const row = item as { loc?: unknown; msg?: unknown }
+          const location = Array.isArray(row.loc) ? row.loc.filter((part) => part !== 'body').join('.') : ''
+          const message = typeof row.msg === 'string' ? row.msg.replace(/^Value error,\s*/i, '') : ''
+          return message ? `${location ? `${location}: ` : ''}${message}` : null
+        }).filter(Boolean).join('; ')
+        : ''
+      const message = typeof details.detail === 'string' ? details.detail : validationDetail || (typeof details.message === 'string' ? details.message : `Request failed (${response.status})`)
       throw new ApiError(message, response.status, details)
     }
     if (response.status === 204) return undefined as T
@@ -102,6 +114,7 @@ export const api = {
   skipPlannedSession: (id: string | number) => request<{ session: PlannedSession; adaptations: AdaptationProposal[] }>(`/planned-sessions/${id}/skip`, { method: 'POST', body: '{}' }),
   completedSessions: () => request<ApiList<CompletedSession>>('/completed-sessions'),
   createCompletedSession: (body: Record<string, unknown>) => request<Record<string, unknown>>('/completed-sessions', { method: 'POST', body: json(body) }),
+  deleteCompletedSession: (id: string | number) => request<{ deleted: boolean; id: number }>(`/completed-sessions/${id}`, { method: 'DELETE' }),
   fatigue: () => request<ApiList<FatigueValue>>('/load-readiness/fatigue'),
   readiness: () => request<ApiList<ReadinessSummary>>('/load-readiness/readiness'),
   saveRecoveryCheckIn: (body: RecoveryCheckIn) => request<RecoveryCheckIn>('/recovery-checkins', { method: 'POST', body: json(body) }),
@@ -124,6 +137,17 @@ export const api = {
     data.append('retain_raw', String(retain))
     return request<{ transcript: string }>('/ai/notes/transcribe', { method: 'POST', body: data })
   },
+  transcribeRunningFeedback: (file: Blob) => {
+    const data = new FormData()
+    data.append('audio', file, 'running-feedback.webm')
+    data.append('retain_raw', 'false')
+    return request<{ transcript: string }>('/ai/running-feedback/transcribe', { method: 'POST', body: data })
+  },
+  transcribeWorkoutInput: (file: Blob) => {
+    const data = new FormData()
+    data.append('audio', file, 'workout-input.webm')
+    return request<{ transcript: string }>('/ai/workouts/transcribe', { method: 'POST', body: data })
+  },
   extractWorkoutText: (text: string) => request<WorkoutExtraction>('/ai/workouts/extract-text', { method: 'POST', body: json({ text }) }),
   extractWorkoutImage: (file: File, retain = false) => {
     const data = new FormData()
@@ -133,6 +157,12 @@ export const api = {
   },
   weeklyReviews: () => request<ApiList<WeeklyReview>>('/weekly-reviews'),
   generateWeeklyReview: (weekStart: string) => request<WeeklyReview>('/weekly-reviews/generate', { method: 'POST', body: json({ week_start: weekStart }) }),
+  reviewPlanProposals: (cadence?: 'WEEKLY' | 'MONTHLY') => request<ApiList<ReviewPlanProposal>>(`/review-plan/proposals${cadence ? `?cadence=${cadence}` : ''}`),
+  generateWeeklyPlan: (weekStart: string) => request<ReviewPlanProposal>('/review-plan/weekly/generate', { method: 'POST', body: json({ week_start: weekStart }) }),
+  generateMonthlyPlan: (monthStart: string) => request<ReviewPlanProposal>('/review-plan/monthly/generate', { method: 'POST', body: json({ month_start: monthStart }) }),
+  editReviewPlan: (id: string | number, proposedPlan: Record<string, unknown>) => request<ReviewPlanProposal>(`/review-plan/proposals/${id}`, { method: 'PATCH', body: json({ proposed_plan: proposedPlan }) }),
+  approveReviewPlan: (id: string | number) => request<ReviewPlanProposal>(`/review-plan/proposals/${id}/approve`, { method: 'POST', body: '{}' }),
+  cancelReviewPlan: (id: string | number) => request<ReviewPlanProposal>(`/review-plan/proposals/${id}/cancel`, { method: 'POST', body: '{}' }),
   createBackup: () => download('/data/backup'),
   exportCsv: (entity: string) => download(`/data/export/${encodeURIComponent(entity)}.csv`),
   restoreBackup: (file: File) => {

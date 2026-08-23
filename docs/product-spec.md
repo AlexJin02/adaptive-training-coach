@@ -96,11 +96,22 @@ Environmental or workout-condition mismatch is disclosed when an efficiency comp
 
 The log supports `RUNNING`, `CLIMBING`, `STRENGTH`, `CROSSFIT_CONDITIONING`, and `MOBILITY_RECOVERY`. Common fields are date, start time, duration, RPE, notes, and optional planned-session linkage.
 
+Displayed durations use `M:SS` below one hour and `H:MM:SS` from one hour upward. Manual workout, Calendar, and reviewed AI-import duration fields accept either form; a plain number remains a convenient total-minutes input. Running baseline and race-goal times use the same clock input, so the athlete never has to calculate total seconds.
+
 Running supports Easy, Recovery, Long Run, Steady, Progression, Threshold, Tempo, Cruise Intervals, VO2max, Intervals, Hill Repeats, Fartlek, Strides, HM Pace, Marathon Pace, Time Trial, and Race. Fields include distance, duration, average pace/HR, maximum HR, elevation, cadence, power, RPE, splits, intervals, and notes. Interval blocks can represent warm-up, repeats, target, recovery, and cool-down.
 
 Climbing supports Bouldering, Tension Board, Sport/Lead, Top Rope, Technique, Limit Bouldering, Power, Power Endurance, Easy Volume, and Outdoor. Quick session fields include location, duration, session type, RPE, hard attempts, maximum attempted/sent grade or colour, and notes. Problem details and style tags are optional.
 
 Strength supports exercise, sets, reps, load, RPE, RIR, duration, and notes. Exercise tags include weighted pull-up, pull-up, one-arm progression, squat, deadlift, bench, overhead press, row, hangboard, core, and custom. Conditioning can record workout name, exercises, rounds, reps, time, load, and RPE.
+
+Optional AI analysis for one completed workout is a single athlete-facing summary of at most 200
+Unicode characters. It highlights only the most useful execution or recovery point and does not
+repeat the detailed metrics already shown in the workout record.
+
+Quick text entry accepts typed text or an optional browser-recorded voice transcription. Both
+paths insert editable text before the normal extraction preview and confirmation. Completed
+records can be permanently deleted only after an explicit irreversible confirmation. Deletion
+removes the record from calculations and planning evidence and cannot be restored.
 
 ### 7. Training Notes
 

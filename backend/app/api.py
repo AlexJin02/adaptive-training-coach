@@ -33,6 +33,7 @@ from app.services import (
     demo,
     media,
     notes,
+    planning,
     reporting,
     serializers,
     settings_service,
@@ -92,6 +93,7 @@ class PlannedSessionInput(InputModel):
     priority: SessionPriority = SessionPriority.NORMAL
     status: PlanStatus = PlanStatus.PLANNED
     structured_blocks: list[dict[str, Any]] = Field(default_factory=list)
+    is_locked: bool = False
 
 
 class CompletedSessionInput(InputModel):
@@ -126,6 +128,20 @@ class CompletedSessionInput(InputModel):
     strength_sets: list[dict[str, Any]] = Field(default_factory=list)
     extraction_reviewed: bool = False
     extraction_fields: dict[str, Any] | None = None
+    subjective_feedback_text: str | None = Field(None, max_length=5000)
+    subjective_feedback_source: Literal["VOICE", "TEXT", "NONE"] = "NONE"
+
+    @model_validator(mode="after")
+    def validate_subjective_feedback(self) -> CompletedSessionInput:
+        text = (self.subjective_feedback_text or "").strip()
+        if self.workout_kind != Sport.RUNNING and text:
+            raise ValueError("subjective running feedback is only valid for RUNNING sessions")
+        if not text:
+            self.subjective_feedback_text = None
+            self.subjective_feedback_source = "NONE"
+        elif self.subjective_feedback_source == "NONE":
+            self.subjective_feedback_source = "TEXT"
+        return self
 
     @model_validator(mode="after")
     def derive_result_time_seconds(self) -> CompletedSessionInput:
@@ -266,6 +282,7 @@ class AdaptationPlanEdit(BaseModel):
     structured_blocks: list[dict[str, Any]] | None = None
     original_session_id: int | str | None = None
     is_demo: bool | None = None
+    is_locked: bool | None = None
     progressed_variable: Literal["volume", "intensity", "none"] | None = None
     note: str | None = None
 
@@ -312,6 +329,14 @@ class AdaptationDecisionInput(InputModel):
 
 class WeeklyReviewInput(InputModel):
     week_start: date
+
+
+class MonthlyReviewPlanInput(InputModel):
+    month_start: date
+
+
+class PlanningProposalEdit(InputModel):
+    proposed_plan: dict[str, Any]
 
 
 class CoachingPrincipleInput(InputModel):
@@ -365,7 +390,9 @@ def capabilities() -> dict[str, Any]:
         "ai_session_analysis": configured,
         "ai_adaptation": configured,
         "ai_weekly_review": configured,
+        "ai_planner": configured,
         "model": settings.openai_model if configured else None,
+        "planner_model": settings.openai_planner_model if configured else None,
         "vision_model": settings.openai_vision_model if configured else None,
         "transcription_model": settings.openai_transcribe_model if configured else None,
         "reason": None
@@ -456,6 +483,17 @@ def save_completed_session(
         return serializers.completed_session(item)
     except (ValueError, LookupError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.delete("/completed-sessions/{session_id}")
+def delete_completed_session(
+    session_id: int, db: DatabaseSession = Depends(get_db)
+) -> dict[str, Any]:
+    try:
+        deleted_id = application.delete_completed_session(db, session_id)
+        return {"deleted": True, "id": deleted_id}
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.post("/recovery-checkins", status_code=status.HTTP_201_CREATED)
@@ -811,6 +849,53 @@ async def ai_transcribe_note(
         raise _ai_error(exc) from exc
 
 
+@router.post("/ai/running-feedback/transcribe")
+async def ai_transcribe_running_feedback(
+    audio: UploadFile = File(...),
+    retain_raw: bool = Form(False),
+    db: DatabaseSession = Depends(get_db),
+) -> dict[str, str]:
+    try:
+        raw = await uploads.read_audio(audio)
+    except uploads.UploadValidationError as exc:
+        raise _upload_error(exc) from exc
+    try:
+        transcript = media.transcribe_audio(
+            db,
+            raw,
+            original_filename=audio.filename,
+            content_type=audio.content_type,
+            retain_raw=retain_raw,
+            purpose="RUNNING_FEEDBACK",
+        )
+        return {"transcript": transcript}
+    except AIUnavailableError as exc:
+        raise _ai_error(exc) from exc
+
+
+@router.post("/ai/workouts/transcribe")
+async def ai_transcribe_workout_input(
+    audio: UploadFile = File(...),
+    db: DatabaseSession = Depends(get_db),
+) -> dict[str, str]:
+    try:
+        raw = await uploads.read_audio(audio)
+    except uploads.UploadValidationError as exc:
+        raise _upload_error(exc) from exc
+    try:
+        transcript = media.transcribe_audio(
+            db,
+            raw,
+            original_filename=audio.filename,
+            content_type=audio.content_type,
+            retain_raw=False,
+            purpose="WORKOUT_IMPORT",
+        )
+        return {"transcript": transcript}
+    except AIUnavailableError as exc:
+        raise _ai_error(exc) from exc
+
+
 @router.post("/ai/workouts/extract-text")
 def ai_extract_text(payload: TextExtractionInput) -> dict[str, Any]:
     try:
@@ -852,6 +937,86 @@ def generate_weekly_review(
     payload: WeeklyReviewInput, db: DatabaseSession = Depends(get_db)
 ) -> dict[str, Any]:
     return reporting.weekly_review_public(reporting.generate_weekly_review(db, payload.week_start))
+
+
+@router.get("/review-plan/proposals")
+def review_plan_proposals(
+    cadence: Literal["WEEKLY", "MONTHLY"] | None = None,
+    db: DatabaseSession = Depends(get_db),
+) -> dict[str, Any]:
+    rows = planning.list_proposals(db, cadence)
+    return {"items": [planning.proposal_public(item) for item in rows], "total": len(rows)}
+
+
+@router.post("/review-plan/weekly/generate")
+def generate_weekly_review_plan(
+    payload: WeeklyReviewInput, db: DatabaseSession = Depends(get_db)
+) -> dict[str, Any]:
+    try:
+        return planning.proposal_public(planning.review_and_plan_week(db, payload.week_start))
+    except AIUnavailableError as exc:
+        raise _ai_error(exc) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.post("/review-plan/monthly/generate")
+def generate_monthly_review_plan(
+    payload: MonthlyReviewPlanInput, db: DatabaseSession = Depends(get_db)
+) -> dict[str, Any]:
+    try:
+        return planning.proposal_public(planning.review_and_plan_month(db, payload.month_start))
+    except AIUnavailableError as exc:
+        raise _ai_error(exc) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.patch("/review-plan/proposals/{proposal_id}")
+def edit_review_plan_proposal(
+    proposal_id: int,
+    payload: PlanningProposalEdit,
+    db: DatabaseSession = Depends(get_db),
+) -> dict[str, Any]:
+    try:
+        return planning.proposal_public(
+            planning.edit_proposal(db, proposal_id, payload.proposed_plan)
+        )
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.post("/review-plan/proposals/{proposal_id}/approve")
+def approve_review_plan_proposal(
+    proposal_id: int, db: DatabaseSession = Depends(get_db)
+) -> dict[str, Any]:
+    try:
+        return planning.proposal_public(planning.approve_proposal(db, proposal_id))
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.post("/review-plan/proposals/{proposal_id}/cancel")
+def cancel_review_plan_proposal(
+    proposal_id: int, db: DatabaseSession = Depends(get_db)
+) -> dict[str, Any]:
+    try:
+        return planning.proposal_public(planning.cancel_proposal(db, proposal_id))
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.get("/review-plan/monthly-block/current")
+def current_monthly_training_block(
+    on: date | None = None, db: DatabaseSession = Depends(get_db)
+) -> dict[str, Any] | None:
+    return planning.current_monthly_block(db, on or date.today())
 
 
 @router.get("/data/backup")

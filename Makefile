@@ -17,13 +17,14 @@ BACKEND_ALEMBIC := $(BACKEND_VENV)/bin/alembic
 BACKEND_PYTEST := $(BACKEND_VENV)/bin/pytest
 BACKEND_RUFF := $(BACKEND_VENV)/bin/ruff
 
-.PHONY: help install check-deps migrate migration-test dev test \
+.PHONY: help install check-deps migrate migration-test dev remote-build remote-server test \
 	backend-test frontend-test typecheck backend-lint frontend-lint lint build clean
 
 help:
 	@echo "Adaptive Training Coach"
 	@echo "  make install        Create the backend venv and install locked frontend deps"
 	@echo "  make dev            Migrate and run FastAPI + Vite"
+	@echo "  make remote-server  Build one-origin HTML and serve it locally for a private HTTPS tunnel"
 	@echo "  make test           Run tests, typecheck, lint, build, and migration smoke test"
 	@echo "  make migrate        Apply Alembic migrations to the configured local database"
 	@echo "  make clean          Remove generated caches and frontend build output only"
@@ -51,6 +52,12 @@ dev: migrate
 		trap 'kill $$backend_pid 2>/dev/null || true' EXIT INT TERM; \
 		$(FRONTEND_ENV) $(PNPM) --dir "$(FRONTEND_DIR)" run dev
 
+remote-build: check-deps
+	@VITE_API_BASE_URL="/api/v1" $(FRONTEND_ENV) $(PNPM) --dir "$(FRONTEND_DIR)" run build
+
+remote-server: migrate remote-build
+	@cd "$(BACKEND_DIR)" && .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+
 backend-test: check-deps
 	@cd "$(BACKEND_DIR)" && .venv/bin/pytest
 
@@ -69,8 +76,7 @@ frontend-lint: check-deps
 
 lint: backend-lint frontend-lint
 
-build: check-deps
-	@$(FRONTEND_ENV) $(PNPM) --dir "$(FRONTEND_DIR)" run build
+build: remote-build
 
 migration-test: check-deps
 	@temp_dir=$$(mktemp -d); \

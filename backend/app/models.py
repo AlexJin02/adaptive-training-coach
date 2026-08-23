@@ -169,6 +169,7 @@ class PlannedSession(TimestampMixin, Base):
     status: Mapped[PlanStatus] = mapped_column(enum_column(PlanStatus), default=PlanStatus.PLANNED)
     structured_blocks: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
     is_demo: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_locked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     version: Mapped[int] = mapped_column(Integer, default=1)
     moved_from_id: Mapped[int | None] = mapped_column(ForeignKey("planned_sessions.id"))
     replaced_session_id: Mapped[int | None] = mapped_column(ForeignKey("planned_sessions.id"))
@@ -213,6 +214,11 @@ class CompletedSession(TimestampMixin, Base):
     srpe_load: Mapped[float | None] = mapped_column(Float)
     base_stress: Mapped[float | None] = mapped_column(Float)
     ai_analysis: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    subjective_feedback_text: Mapped[str | None] = mapped_column(Text)
+    subjective_feedback_source: Mapped[str] = mapped_column(
+        String(16), default="NONE", nullable=False
+    )
+    subjective_feedback_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     is_demo: Mapped[bool] = mapped_column(Boolean, default=False)
 
     running: Mapped[RunningSessionDetail | None] = relationship(
@@ -530,6 +536,53 @@ class WeeklyReview(TimestampMixin, Base):
     next_week: Mapped[list[str]] = mapped_column(JSON, default=list)
     narrative: Mapped[str] = mapped_column(Text, default="")
     source: Mapped[str] = mapped_column(String(32), default="RULE_ENGINE")
+
+
+class PlanningMemory(TimestampMixin, Base):
+    """Compact persisted summaries used by planning calls, never raw media."""
+
+    __tablename__ = "planning_memories"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    memory_key: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    level: Mapped[str] = mapped_column(String(24), index=True)
+    period_start: Mapped[date | None] = mapped_column(Date)
+    period_end: Mapped[date | None] = mapped_column(Date)
+    content: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    source: Mapped[str] = mapped_column(String(32), default="RULE_ENGINE")
+
+
+class PlanningProposal(TimestampMixin, Base):
+    """Append-only AI preview. Approval is the only path that applies its plan."""
+
+    __tablename__ = "planning_proposals"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    cadence: Mapped[str] = mapped_column(String(16), index=True)
+    period_start: Mapped[date] = mapped_column(Date, index=True)
+    period_end: Mapped[date] = mapped_column(Date)
+    target_start: Mapped[date] = mapped_column(Date)
+    target_end: Mapped[date] = mapped_column(Date)
+    deterministic_summary: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    context_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    review: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    proposed_plan: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String(16), default="PREVIEW", index=True)
+    source: Mapped[str] = mapped_column(String(32), default="AI")
+    model_name: Mapped[str | None] = mapped_column(String(120))
+    approval_result: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class MonthlyTrainingBlock(TimestampMixin, Base):
+    __tablename__ = "monthly_training_blocks"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    month_start: Mapped[date] = mapped_column(Date, index=True)
+    month_end: Mapped[date] = mapped_column(Date)
+    content: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    source_proposal_id: Mapped[int] = mapped_column(ForeignKey("planning_proposals.id"))
+    status: Mapped[str] = mapped_column(String(16), default="ACTIVE", index=True)
 
 
 class TrainingNote(TimestampMixin, Base):

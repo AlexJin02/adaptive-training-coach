@@ -40,6 +40,7 @@ backend/data/backups/
 backend/data/exports/
 backend/data/media/
 backend/data/uploads/
+backend/data/tailscale/
 
 # Logs and temporary files
 *.log

@@ -8,6 +8,7 @@ from app import models
 from app.ai import (
     AIUnavailableError,
     extract_workout_from_image,
+    transcribe_running_feedback,
     transcribe_training_note,
 )
 from app.config import get_settings
@@ -20,6 +21,7 @@ def transcribe_audio(
     original_filename: str | None,
     content_type: str | None,
     retain_raw: bool,
+    purpose: str = "TRAINING_NOTE",
 ) -> str:
     settings = get_settings()
     retain_setting = db.get(models.AppSetting, "retain_audio")
@@ -36,7 +38,12 @@ def transcribe_audio(
     db.commit()
     db.refresh(media)
     try:
-        transcript = transcribe_training_note(
+        transcriber = (
+            transcribe_running_feedback
+            if purpose == "RUNNING_FEEDBACK"
+            else transcribe_training_note
+        )
+        transcript = transcriber(
             raw,
             original_filename or "training-note.webm",
             content_type or "audio/webm",
@@ -49,7 +56,7 @@ def transcribe_audio(
             path.write_bytes(raw)
             media.local_path = str(path)
         media.status = "EXTRACTED"
-        media.extraction = {"transcript": transcript}
+        media.extraction = {"transcript": transcript, "purpose": purpose}
         db.commit()
         return transcript
     except AIUnavailableError as exc:

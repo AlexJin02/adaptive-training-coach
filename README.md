@@ -15,6 +15,8 @@ This README describes the checked-in runtime. [Product specification](docs/produ
 - Deterministic plan comparison and constrained adaptation proposals with revision/decision history
 - Screenshot and natural-language workout extraction with preview-before-save
 - Text and voice Training Notes, structured into Running, Climbing, or Strength & Mobility
+- Combined Weekly and Monthly Review & Plan previews with explicit approval
+- Optional editable post-run voice feedback after screenshot extraction
 - Weekly reviews, versioned JSON backup/restore, CSV export, and removable demo data
 
 Strength, CrossFit/conditioning, and mobility are supporting activities. They affect fatigue but do not have their own goal, athlete-state, readiness, or progress dashboard.
@@ -74,6 +76,7 @@ Useful commands:
 ```bash
 make migrate       # apply Alembic migrations
 make dev           # run backend and frontend together
+make remote-server # build one-origin HTML and serve it on Mac for a private tunnel
 make test          # full verification suite
 make backend-test  # pytest only
 make frontend-test # Vitest only
@@ -89,10 +92,11 @@ make clean         # remove generated caches/build output, not athlete data
 | Variable | Purpose | Default behaviour |
 | --- | --- | --- |
 | `DATABASE_URL` | SQLAlchemy SQLite URL | Resolves to `backend/data/training_coach.db` |
-| `VITE_API_BASE_URL` | Browser API base | `http://127.0.0.1:8000/api/v1` |
+| `VITE_API_BASE_URL` | Vite development API base | `http://127.0.0.1:8000/api/v1`; production builds always use same-origin `/api/v1` for phone access |
 | `CORS_ORIGINS` | JSON array of allowed browser origins | Vite localhost origins |
 | `OPENAI_API_KEY` | Optional provider credential | AI features report unavailable when blank |
 | `OPENAI_MODEL` | Text analysis/coaching model | Chosen in backend configuration |
+| `OPENAI_PLANNER_MODEL` | Weekly and monthly structured planning model | `gpt-5-mini` |
 | `OPENAI_VISION_MODEL` | Screenshot extraction model | Chosen in backend configuration |
 | `OPENAI_TRANSCRIBE_MODEL` | Voice transcription model | Chosen in backend configuration |
 | `RETAIN_RAW_SCREENSHOTS` | Retain uploaded screenshots locally | `false` |
@@ -100,6 +104,25 @@ make clean         # remove generated caches/build output, not athlete data
 | `LOAD_DEMO_DATA` | Explicitly enable demo-data loading | `false` |
 
 Do not put API keys in frontend variables, source files, screenshots, commits, or backups. Core training features do not require a key.
+
+## Private phone access
+
+`make remote-server` builds the React application with a same-origin `/api/v1` base and serves
+the HTML, assets, SPA routes, and API from FastAPI on `127.0.0.1:8000`. A private HTTPS tunnel
+such as Tailscale Serve can proxy that single loopback service without exposing SQLite or a
+development server directly to the LAN or public internet.
+
+Install Tailscale on the Mac and phone, sign in to the same private tailnet, then configure the
+Mac after adding its exact `https://<device>.<tailnet>.ts.net` URL to `CORS_ORIGINS`:
+
+```bash
+make remote-server
+tailscale serve http://127.0.0.1:8000
+```
+
+Open the HTTPS URL printed by Tailscale on the phone. All reads and writes still use the SQLite
+database on the Mac. The Mac must remain awake, connected to Tailscale, and running the server.
+Use Tailscale **Serve**, not Funnel: Serve is private to the tailnet, while Funnel is public.
 
 ## AI-assisted workflows
 

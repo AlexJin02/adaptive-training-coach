@@ -12,6 +12,7 @@ const unavailable: ApiCapabilities = {
   ai_session_analysis: false,
   ai_adaptation: false,
   ai_weekly_review: false,
+  ai_planner: false,
   reason: 'AI is not configured. Manual tools and the deterministic training engine remain available.',
 }
 

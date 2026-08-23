@@ -1,5 +1,8 @@
+import pytest
+
 from app.ai import functions
 from app.ai.functions import (
+    AIUnavailableError,
     PlanAdaptationOutput,
     SessionAnalysisOutput,
     WeeklyReviewOutput,
@@ -8,6 +11,7 @@ from app.ai.functions import (
     propose_plan_adaptation,
 )
 from app.enums import AdaptationAction
+from app.services.serializers import compact_session_analysis
 
 
 def test_workout_extraction_contract_preserves_rpe_and_structured_fields(monkeypatch) -> None:  # noqa: ANN001
@@ -43,6 +47,40 @@ def test_workout_extraction_contract_preserves_rpe_and_structured_fields(monkeyp
     assert result.rpe.value == 7
     assert result.intervals.value == ["1 km @ 4:20"]
     assert {"max_hr", "splits", "intervals"}.issubset(captured["schema"]["properties"])
+
+
+def test_workout_extraction_normalises_voice_friendly_formats(monkeypatch) -> None:  # noqa: ANN001
+    def fake_call(**_kwargs):  # noqa: ANN003, ANN202
+        values = {
+            "workout_kind": "RUNNING",
+            "session_type": "Easy",
+            "activity_type": "Running",
+            "date": "今天",
+            "duration_minutes": 62,
+            "average_pace": "5分08秒 /km",
+            "average_hr": 145.4,
+            "max_hr": 171.8,
+            "rpe": 4,
+        }
+        return {
+            name: {
+                "value": values.get(name),
+                "confidence": "HIGH" if name in values else "LOW",
+                "source": "spoken text" if name in values else "not present",
+            }
+            for name in functions.WORKOUT_FIELDS
+        }
+
+    monkeypatch.setattr(functions, "_responses_json", fake_call)
+    result = extract_workout_from_text(
+        "今天 easy run 62 分鐘，平均配速 5分08秒，心率 145，RPE 4",
+        reference_date=functions.date(2026, 8, 23),
+    )
+    assert result.date.value == "2026-08-23"
+    assert result.duration_minutes.value == 62
+    assert result.average_pace.value == "5:08"
+    assert result.average_hr.value == 145
+    assert result.max_hr.value == 172
 
 
 def test_typed_adaptation_contract_rejects_unrestricted_action(monkeypatch) -> None:  # noqa: ANN001
@@ -85,11 +123,7 @@ def test_typed_adaptation_contract_rejects_unrestricted_action(monkeypatch) -> N
 def test_session_and_weekly_ai_have_distinct_typed_outputs(monkeypatch) -> None:  # noqa: ANN001
     def fake_session(**_kwargs):  # noqa: ANN003, ANN202
         return {
-            "execution_summary": "Controlled execution",
-            "planned_vs_actual": ["RPE matched target"],
-            "strong_execution": True,
-            "unexpected_fatigue": False,
-            "evidence": ["RPE 7"],
+            "summary": "Controlled execution; RPE matched the target.",
             "confidence": "MODERATE",
         }
 
@@ -106,6 +140,7 @@ def test_session_and_weekly_ai_have_distinct_typed_outputs(monkeypatch) -> None:
         }
     )
     assert isinstance(session, SessionAnalysisOutput)
+    assert len(session.summary) <= 200
 
     def fake_weekly(**_kwargs):  # noqa: ANN003, ANN202
         return {
@@ -130,3 +165,33 @@ def test_session_and_weekly_ai_have_distinct_typed_outputs(monkeypatch) -> None:
         }
     )
     assert isinstance(weekly, WeeklyReviewOutput)
+
+
+def test_session_analysis_enforces_200_character_limit(monkeypatch) -> None:  # noqa: ANN001
+    monkeypatch.setattr(
+        functions,
+        "_responses_json",
+        lambda **_kwargs: {"summary": "x" * 201, "confidence": "LOW"},
+    )
+    with pytest.raises(AIUnavailableError):
+        functions.analyse_completed_session(
+            {
+                "primary_goal": "HALF_MARATHON",
+                "running_phase": "AEROBIC_BASE",
+                "climbing_phase": "TECHNIQUE_VOLUME",
+                "planned_workout": {},
+                "completed_workout": {},
+                "fatigue": {},
+                "readiness": {},
+            }
+        )
+
+
+def test_legacy_session_analysis_is_compacted_for_display() -> None:
+    compact = compact_session_analysis(
+        {"execution_summary": f"  {'long ' * 80}  ", "confidence": "MODERATE"}
+    )
+    assert compact is not None
+    assert len(compact["summary"]) == 200
+    assert compact["summary"].endswith("…")
+    assert compact["confidence"] == "MODERATE"

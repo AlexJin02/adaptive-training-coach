@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     athlete_timezone: str = "Europe/London"
     openai_api_key: str | None = None
     openai_model: str = "gpt-5-mini"
+    openai_planner_model: str = "gpt-5-mini"
     openai_vision_model: str = "gpt-5-mini"
     openai_transcribe_model: str = "gpt-4o-mini-transcribe"
     retain_raw_screenshots: bool = False
@@ -33,7 +34,11 @@ class Settings(BaseSettings):
     media_dir: Path = BACKEND_DIR / "data" / "media"
 
     @field_validator(
-        "openai_model", "openai_vision_model", "openai_transcribe_model", mode="before"
+        "openai_model",
+        "openai_planner_model",
+        "openai_vision_model",
+        "openai_transcribe_model",
+        mode="before",
     )
     @classmethod
     def blank_model_uses_default(cls, value: str | None, info) -> str:  # noqa: ANN001
@@ -41,6 +46,7 @@ class Settings(BaseSettings):
             return value
         defaults = {
             "openai_model": "gpt-5-mini",
+            "openai_planner_model": "gpt-5-mini",
             "openai_vision_model": "gpt-5-mini",
             "openai_transcribe_model": "gpt-4o-mini-transcribe",
         }

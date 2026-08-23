@@ -160,16 +160,13 @@ configured. Context contains the current goal, both phases, linked plan when pre
 workout, fatigue, and readiness. Output is:
 
 ```text
-execution_summary
-planned_vs_actual[]
-strong_execution
-unexpected_fatigue
-evidence[]
+summary (maximum 200 Unicode characters)
 confidence
 ```
 
-The result is stored in `completed_sessions.ai_analysis`. An unavailable provider is ignored so
-the workout remains saved.
+The compact result is stored in `completed_sessions.ai_analysis`. It may highlight one useful
+planned-versus-actual or recovery point, but does not repeat the raw workout/fatigue/readiness
+payload. An unavailable provider is ignored so the workout remains saved.
 
 ## `propose_plan_adaptation()`
 
@@ -233,8 +230,9 @@ weekly-review call.
 ## Prompt and context management
 
 System instructions are currently inline in `backend/app/ai/functions.py`, with one instruction
-per function. Model names come from `OPENAI_MODEL`, `OPENAI_VISION_MODEL`, and
-`OPENAI_TRANSCRIBE_MODEL`. Explicit prompt versioning, context-length policies, provider request
+per function. Model names come from `OPENAI_MODEL`, `OPENAI_PLANNER_MODEL`,
+`OPENAI_VISION_MODEL`, and `OPENAI_TRANSCRIBE_MODEL`. Explicit prompt versioning,
+context-length policies, provider request
 IDs, and stored trace metadata remain acceptance work.
 
 ## Automated test coverage

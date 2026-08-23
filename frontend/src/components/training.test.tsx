@@ -28,7 +28,7 @@ describe('adaptation proposal editing', () => {
     vi.stubGlobal('fetch', fetchMock)
     const user = userEvent.setup()
     render(<AdaptationCard proposal={proposal} />)
-    expect(screen.getByText(/duration minutes: 90/i)).toBeInTheDocument()
+    expect(screen.getByText(/duration minutes: 1:30:00/i)).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Edit' }))
     const editor = screen.getByLabelText(/Proposed plan JSON/)
     fireEvent.change(editor, { target: { value: JSON.stringify({ date: '2026-08-29', duration_minutes: 50, description: 'Controlled threshold' }) } })
@@ -38,7 +38,7 @@ describe('adaptation proposal editing', () => {
     if (!init) throw new Error('Expected adaptation decision request options')
     const body = JSON.parse(String(init.body)) as { proposed_plan: Record<string, unknown> }
     expect(body.proposed_plan).toMatchObject({ date: '2026-08-29', duration_minutes: 50 })
-    expect(screen.getByText(/duration minutes: 90/i)).toBeInTheDocument()
+    expect(screen.getByText(/duration minutes: 1:30:00/i)).toBeInTheDocument()
   })
 
   it('does not mark an unchanged Apply action as an edited proposal', async () => {

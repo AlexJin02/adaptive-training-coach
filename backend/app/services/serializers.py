@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from app import models
-from app.enums import FatigueDomain, ReadinessLabel, Sport
+from app.enums import Confidence, FatigueDomain, ReadinessLabel, Sport
 from app.training_engine.config import (
     HALF_LIFE_HOURS,
     HIGH_FATIGUE_THRESHOLD,
@@ -90,7 +90,26 @@ def planned_session(item: models.PlannedSession) -> dict[str, Any]:
         "status": item.status.value,
         "original_session_id": item.moved_from_id or item.replaced_session_id,
         "is_demo": item.is_demo,
+        "is_locked": item.is_locked,
         "structured_blocks": item.structured_blocks,
+    }
+
+
+def compact_session_analysis(value: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Keep legacy and restored AI analysis bounded at the public API boundary."""
+
+    if not isinstance(value, dict):
+        return None
+    raw_summary = value.get("summary") or value.get("execution_summary")
+    if not isinstance(raw_summary, str) or not raw_summary.strip():
+        return None
+    summary = " ".join(raw_summary.split())
+    if len(summary) > 200:
+        summary = f"{summary[:199].rstrip()}…"
+    confidence = value.get("confidence")
+    return {
+        "summary": summary,
+        "confidence": confidence if confidence in {item.value for item in Confidence} else None,
     }
 
 
@@ -126,7 +145,14 @@ def completed_session(item: models.CompletedSession) -> dict[str, Any]:
         "strength": None,
         "notes": item.notes,
         "planned_session_id": item.planned_session_id,
-        "ai_analysis": item.ai_analysis,
+        "ai_analysis": compact_session_analysis(item.ai_analysis),
+        "subjective_feedback_text": item.subjective_feedback_text,
+        "subjective_feedback_source": item.subjective_feedback_source,
+        "subjective_feedback_created_at": (
+            item.subjective_feedback_created_at.isoformat()
+            if item.subjective_feedback_created_at
+            else None
+        ),
         "is_demo": item.is_demo,
     }
     if item.running:

@@ -173,6 +173,7 @@ def create_planned_session(db: Session, values: dict[str, Any]) -> models.Planne
         status=PlanStatus(values.get("status") or PlanStatus.PLANNED),
         structured_blocks=values.get("structured_blocks") or [],
         is_demo=bool(values.get("is_demo", False)),
+        is_locked=bool(values.get("is_locked", False)),
     )
     db.add(item)
     db.flush()
@@ -277,6 +278,11 @@ def create_completed_session(db: Session, values: dict[str, Any]) -> models.Comp
         notes=values.get("notes") or "",
         srpe_load=load.srpe_load,
         base_stress=load.base_stress,
+        subjective_feedback_text=values.get("subjective_feedback_text"),
+        subjective_feedback_source=values.get("subjective_feedback_source") or "NONE",
+        subjective_feedback_created_at=(
+            datetime.now(UTC) if values.get("subjective_feedback_text") else None
+        ),
         is_demo=bool(values.get("is_demo", False)),
     )
     db.add(item)
@@ -383,17 +389,84 @@ def get_completed_session(db: Session, session_id: int) -> models.CompletedSessi
 
 
 def list_completed_sessions(db: Session) -> list[models.CompletedSession]:
-    query = (
-        select(models.CompletedSession)
-        .options(
-            selectinload(models.CompletedSession.running),
-            selectinload(models.CompletedSession.climbing),
-            selectinload(models.CompletedSession.strength),
-            selectinload(models.CompletedSession.domain_stresses),
-        )
-        .order_by(models.CompletedSession.session_date.desc(), models.CompletedSession.id.desc())
+    query = select(models.CompletedSession).options(
+        selectinload(models.CompletedSession.running),
+        selectinload(models.CompletedSession.climbing),
+        selectinload(models.CompletedSession.strength),
+        selectinload(models.CompletedSession.domain_stresses),
+    )
+    query = query.order_by(
+        models.CompletedSession.session_date.desc(), models.CompletedSession.id.desc()
     )
     return list(db.scalars(query))
+
+
+def _rebuild_automatic_running_estimates(db: Session) -> None:
+    """Recreate derived estimates from active evidence while preserving manual entries."""
+
+    db.query(models.RunningFitnessEstimate).filter(
+        models.RunningFitnessEstimate.evidence.like("Completed session %")
+    ).delete(synchronize_session=False)
+    db.query(models.ThresholdEstimate).filter(
+        (models.ThresholdEstimate.source.like("Completed % session (session %"))
+        | models.ThresholdEstimate.source.like("Range from % recent easy/steady runs at RPE <= 4")
+    ).delete(synchronize_session=False)
+    db.commit()
+    active_running = list(
+        db.scalars(
+            select(models.CompletedSession)
+            .options(selectinload(models.CompletedSession.running))
+            .where(models.CompletedSession.sport == Sport.RUNNING)
+            .order_by(models.CompletedSession.session_date, models.CompletedSession.id)
+        )
+    )
+    for session in active_running:
+        update_running_fitness_estimate(db, session)
+        update_threshold_estimates(db, session)
+
+
+def delete_completed_session(db: Session, session_id: int) -> int:
+    item = get_completed_session(db, session_id)
+    planned_session_id = item.planned_session_id
+    events = list(
+        db.scalars(
+            select(models.AdaptationEvent).where(
+                models.AdaptationEvent.trigger_session_id == item.id
+            )
+        )
+    )
+    for event in events:
+        event.trigger_session_id = None
+        event.evidence = [*event.evidence, f"Trigger session {item.id} was permanently deleted"]
+    media_rows = list(
+        db.scalars(
+            select(models.MediaImport).where(models.MediaImport.confirmed_session_id == item.id)
+        )
+    )
+    for media_item in media_rows:
+        media_item.confirmed_session_id = None
+    for snapshot_model in (models.FatigueSnapshot, models.ReadinessSnapshot):
+        db.query(snapshot_model).filter(snapshot_model.source_key == f"session:{item.id}").delete(
+            synchronize_session=False
+        )
+    db.delete(item)
+    db.commit()
+    if planned_session_id:
+        plan = db.get(models.PlannedSession, planned_session_id)
+        another_completed = db.scalar(
+            select(models.CompletedSession.id).where(
+                models.CompletedSession.planned_session_id == planned_session_id,
+            )
+        )
+        if plan and not another_completed and plan.status == PlanStatus.COMPLETED:
+            update_planned_session(
+                db,
+                plan,
+                {"status": PlanStatus.PLANNED},
+                "Linked completed record was permanently deleted",
+            )
+    _rebuild_automatic_running_estimates(db)
+    return session_id
 
 
 def _session_event_time(item: models.CompletedSession, profile: models.AthleteProfile) -> datetime:
@@ -631,7 +704,7 @@ def update_threshold_estimates(
     reference_date = (
         db.scalar(
             select(func.max(models.CompletedSession.session_date)).where(
-                models.CompletedSession.sport == Sport.RUNNING
+                models.CompletedSession.sport == Sport.RUNNING,
             )
         )
         or session.session_date
@@ -726,7 +799,9 @@ def _running_distance_between(db: Session, start: date, end: date) -> float:
     value = db.scalar(
         select(func.coalesce(func.sum(models.RunningSessionDetail.distance_km), 0.0))
         .join(models.CompletedSession)
-        .where(models.CompletedSession.session_date.between(start, end))
+        .where(
+            models.CompletedSession.session_date.between(start, end),
+        )
     )
     return float(value or 0.0)
 
@@ -1214,6 +1289,8 @@ def create_adaptation_proposals(db: Session) -> list[models.AdaptationEvent]:
         affected = db.get(models.PlannedSession, proposal.affected_session_id)
         old = plan_snapshot(affected) if affected else {}
         proposed = {**old, **proposal.proposed_changes}
+        if "session_date" in proposal.proposed_changes:
+            proposed["date"] = proposal.proposed_changes["session_date"]
         event_reason = proposal.reason
         event_evidence = list(proposal.evidence)
         event_confidence = proposal.confidence
@@ -1403,11 +1480,14 @@ def mark_planned_session_skipped(
     for proposal in propose_adaptations(context):
         affected = db.get(models.PlannedSession, proposal.affected_session_id)
         original = plan_snapshot(affected) if affected else {}
+        proposed = {**original, **proposal.proposed_changes}
+        if "session_date" in proposal.proposed_changes:
+            proposed["date"] = proposal.proposed_changes["session_date"]
         event = models.AdaptationEvent(
             affected_session_id=proposal.affected_session_id,
             trigger_session_id=None,
             original_plan=original,
-            proposed_plan={**original, **proposal.proposed_changes},
+            proposed_plan=proposed,
             action=proposal.action,
             reason=proposal.reason,
             evidence=[*proposal.evidence, f"Skipped planned session {plan.id}"],

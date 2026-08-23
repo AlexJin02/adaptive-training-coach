@@ -34,6 +34,7 @@ describe('calendar planning', () => {
 
     const emptyDays = await screen.findAllByRole('button', { name: 'Plan or rest' })
     await user.click(emptyDays[0]!)
+    expect(screen.getByLabelText(/^Duration/)).toHaveValue('45:00')
     await user.selectOptions(screen.getByLabelText('Activity'), 'STRENGTH')
     await user.selectOptions(screen.getByLabelText('Session type'), sessionType)
     expect(screen.getByLabelText('Planned exercise 1')).toHaveValue(exercise)

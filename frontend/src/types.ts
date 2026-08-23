@@ -20,7 +20,9 @@ export interface ApiCapabilities {
   ai_session_analysis: boolean
   ai_adaptation: boolean
   ai_weekly_review: boolean
+  ai_planner: boolean
   model?: string | null
+  planner_model?: string | null
   vision_model?: string | null
   transcription_model?: string | null
   reason?: string | null
@@ -76,6 +78,7 @@ export interface PlannedSession {
   status: SessionStatus
   original_session_id?: number | string | null
   is_demo?: boolean
+  is_locked?: boolean
   structured_blocks?: Array<Record<string, unknown>>
 }
 
@@ -116,6 +119,9 @@ export interface CompletedSession {
   notes?: string | null
   planned_session_id?: number | string | null
   ai_analysis?: Record<string, unknown> | null
+  subjective_feedback_text?: string | null
+  subjective_feedback_source?: 'VOICE' | 'TEXT' | 'NONE'
+  subjective_feedback_created_at?: string | null
   is_demo?: boolean
 }
 
@@ -336,6 +342,68 @@ export interface WeeklyReview {
   key_findings: string[]
   next_week: string[]
   source?: AdaptationSource
+}
+
+export interface ReviewPlanProposal {
+  id: number | string
+  cadence: 'WEEKLY' | 'MONTHLY'
+  period_start: string
+  period_end: string
+  target_start: string
+  target_end: string
+  deterministic_summary: Record<string, unknown>
+  review: {
+    summary: string
+    running_analysis: string
+    climbing_analysis: string
+    recovery_analysis: string
+    goal_progress?: string
+    key_findings: string[]
+  }
+  proposed_plan: WeeklyPlanPreview | MonthlyBlockPreview
+  status: 'PREVIEW' | 'APPROVED' | 'CANCELLED'
+  source: 'AI'
+  model?: string | null
+  approval_result?: Record<string, unknown>
+  created_at: string
+  approved_at?: string | null
+}
+
+export interface WeeklyPlanPreview {
+  summary: string
+  running_target_km: number
+  running_objectives: string[]
+  climbing_objectives: string[]
+  sessions: Array<{
+    date: string
+    start_time?: string | null
+    workout_kind: WorkoutKind
+    session_type: string
+    title: string
+    description: string
+    planned_duration_minutes?: number | null
+    planned_distance_km?: number | null
+    target_rpe?: number | null
+    priority: 'LOW' | 'NORMAL' | 'HIGH'
+    structured_blocks: Array<Record<string, unknown>>
+  }>
+  warnings: string[]
+}
+
+export interface MonthlyBlockPreview {
+  running_phase: string
+  climbing_phase: string
+  running_objectives: string[]
+  climbing_objectives: string[]
+  weekly_running_volume_targets: number[]
+  quality_session_guidance: string
+  long_run_guidance: string
+  climbing_frequency_guidance: string
+  climbing_focus: string[]
+  supporting_strength_guidance: string
+  progression_criteria: string[]
+  hold_criteria: string[]
+  deload_criteria: string[]
 }
 
 export interface ExtractionField<T = string | number | null> {

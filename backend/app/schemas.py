@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 
@@ -119,6 +119,7 @@ class PlannedSessionCreate(APIModel):
     priority: SessionPriority = SessionPriority.NORMAL
     status: PlanStatus = PlanStatus.PLANNED
     structured_blocks: list[dict[str, Any]] = Field(default_factory=list)
+    is_locked: bool = False
 
     @model_validator(mode="after")
     def validate_rpe_range(self) -> PlannedSessionCreate:
@@ -219,6 +220,8 @@ class CompletedSessionCreate(APIModel):
     running: RunningDetailIn | None = None
     climbing: ClimbingDetailIn | None = None
     strength: StrengthDetailIn | None = None
+    subjective_feedback_text: str | None = Field(None, max_length=5000)
+    subjective_feedback_source: Literal["VOICE", "TEXT", "NONE"] = "NONE"
 
     @model_validator(mode="after")
     def validate_sport_detail(self) -> CompletedSessionCreate:
@@ -272,6 +275,9 @@ class CompletedSessionOut(APIModel):
     notes: str
     srpe_load: float | None
     base_stress: float | None
+    subjective_feedback_text: str | None
+    subjective_feedback_source: Literal["VOICE", "TEXT", "NONE"]
+    subjective_feedback_created_at: datetime | None
     is_demo: bool
     running: RunningDetailOut | None = None
     climbing: ClimbingDetailOut | None = None

@@ -13,7 +13,7 @@ const navigation: { to: string; label: string; short: string; icon: IconName }[]
   { to: '/progress', label: 'Progress', short: 'Progress', icon: 'progress' },
   { to: '/workouts', label: 'Workout Log', short: 'Log', icon: 'workouts' },
   { to: '/notes', label: 'Training Notes', short: 'Notes', icon: 'notes' },
-  { to: '/weekly-review', label: 'Weekly Review', short: 'Review', icon: 'review' },
+  { to: '/review-plan', label: 'Review & Plan', short: 'Plan', icon: 'review' },
   { to: '/settings', label: 'Settings', short: 'Settings', icon: 'settings' },
 ]
 
