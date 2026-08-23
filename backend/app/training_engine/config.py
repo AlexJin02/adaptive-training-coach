@@ -1,0 +1,167 @@
+from __future__ import annotations
+
+from app.enums import FatigueDomain
+
+ALGORITHM_VERSION = "v1"
+STRESS_DIVISOR = 90.0
+MAX_BASE_STRESS = 10.0
+
+HALF_LIFE_HOURS: dict[FatigueDomain, float] = {
+    FatigueDomain.CARDIOVASCULAR: 18.0,
+    FatigueDomain.LOWER_BODY: 30.0,
+    FatigueDomain.FINGER_FOREARM: 36.0,
+    FatigueDomain.PULLING_UPPER_BODY: 30.0,
+    FatigueDomain.NEURAL: 24.0,
+    FatigueDomain.SYSTEMIC: 18.0,
+}
+
+ZERO_PROFILE = {domain: 0.0 for domain in FatigueDomain}
+
+
+def profile(**values: float) -> dict[FatigueDomain, float]:
+    result = ZERO_PROFILE.copy()
+    for name, value in values.items():
+        result[FatigueDomain[name]] = value
+    return result
+
+
+# Required V1 examples are kept verbatim; additional profiles are conservative mappings.
+RUNNING_EASY = profile(CARDIOVASCULAR=0.70, LOWER_BODY=0.60, NEURAL=0.10, SYSTEMIC=0.30)
+RUNNING_LONG = profile(CARDIOVASCULAR=0.90, LOWER_BODY=0.90, NEURAL=0.20, SYSTEMIC=0.60)
+RUNNING_THRESHOLD = profile(CARDIOVASCULAR=1.00, LOWER_BODY=0.80, NEURAL=0.40, SYSTEMIC=0.60)
+RUNNING_HARD = profile(CARDIOVASCULAR=1.00, LOWER_BODY=0.90, NEURAL=0.60, SYSTEMIC=0.70)
+RUNNING_STEADY = profile(CARDIOVASCULAR=0.80, LOWER_BODY=0.70, NEURAL=0.20, SYSTEMIC=0.40)
+RUNNING_STRIDES = profile(CARDIOVASCULAR=0.60, LOWER_BODY=0.60, NEURAL=0.45, SYSTEMIC=0.30)
+
+RUNNING_PROFILES: dict[str, dict[FatigueDomain, float]] = {
+    "easy": RUNNING_EASY,
+    "recovery": RUNNING_EASY,
+    "long run": RUNNING_LONG,
+    "steady": RUNNING_STEADY,
+    "progression": RUNNING_STEADY,
+    "threshold": RUNNING_THRESHOLD,
+    "tempo": RUNNING_THRESHOLD,
+    "cruise intervals": RUNNING_THRESHOLD,
+    "hm pace": RUNNING_THRESHOLD,
+    "marathon pace": RUNNING_STEADY,
+    "vo2max": RUNNING_HARD,
+    "intervals": RUNNING_HARD,
+    "hill repeats": RUNNING_HARD,
+    "fartlek": RUNNING_HARD,
+    "time trial": RUNNING_HARD,
+    "race": RUNNING_HARD,
+    "strides": RUNNING_STRIDES,
+}
+
+CLIMBING_EASY = profile(FINGER_FOREARM=0.35, PULLING_UPPER_BODY=0.40, NEURAL=0.20, SYSTEMIC=0.20)
+CLIMBING_LIMIT = profile(FINGER_FOREARM=1.00, PULLING_UPPER_BODY=0.90, NEURAL=1.00, SYSTEMIC=0.50)
+CLIMBING_BOARD_POWER = profile(
+    FINGER_FOREARM=0.90, PULLING_UPPER_BODY=0.90, NEURAL=1.00, SYSTEMIC=0.50
+)
+CLIMBING_POWER_ENDURANCE = profile(
+    FINGER_FOREARM=0.80, PULLING_UPPER_BODY=0.80, NEURAL=0.50, SYSTEMIC=0.70
+)
+CLIMBING_GENERAL = profile(FINGER_FOREARM=0.60, PULLING_UPPER_BODY=0.60, NEURAL=0.35, SYSTEMIC=0.35)
+
+CLIMBING_PROFILES: dict[str, dict[FatigueDomain, float]] = {
+    "technique": CLIMBING_EASY,
+    "easy volume": CLIMBING_EASY,
+    "limit bouldering": CLIMBING_LIMIT,
+    "tension board": CLIMBING_BOARD_POWER,
+    "power": CLIMBING_BOARD_POWER,
+    "power endurance": CLIMBING_POWER_ENDURANCE,
+    "bouldering": CLIMBING_GENERAL,
+    "sport / lead": CLIMBING_GENERAL,
+    "top rope": CLIMBING_GENERAL,
+    "outdoor": CLIMBING_GENERAL,
+}
+
+HARD_ATTEMPT_THRESHOLD = 10
+HARD_ATTEMPT_INCREMENT = 0.015
+HARD_ATTEMPT_MULTIPLIER_CAP = 1.25
+
+STRENGTH_EXERCISE_PROFILES: dict[str, dict[FatigueDomain, float]] = {
+    "weighted pull-up": profile(
+        FINGER_FOREARM=0.45, PULLING_UPPER_BODY=1.00, NEURAL=0.75, SYSTEMIC=0.30
+    ),
+    "pull-up": profile(FINGER_FOREARM=0.30, PULLING_UPPER_BODY=0.75, NEURAL=0.35, SYSTEMIC=0.25),
+    "one-arm pull-up": profile(
+        FINGER_FOREARM=0.40, PULLING_UPPER_BODY=1.00, NEURAL=0.90, SYSTEMIC=0.30
+    ),
+    "hangboard": profile(FINGER_FOREARM=1.00, PULLING_UPPER_BODY=0.20, NEURAL=0.85),
+    "max hang": profile(FINGER_FOREARM=1.00, PULLING_UPPER_BODY=0.20, NEURAL=0.90),
+    "squat": profile(LOWER_BODY=1.00, NEURAL=0.80, SYSTEMIC=0.60),
+    "deadlift": profile(LOWER_BODY=0.90, PULLING_UPPER_BODY=0.60, NEURAL=0.90, SYSTEMIC=0.80),
+    "bench": profile(PULLING_UPPER_BODY=0.20, NEURAL=0.45, SYSTEMIC=0.30),
+    "overhead press": profile(PULLING_UPPER_BODY=0.35, NEURAL=0.50, SYSTEMIC=0.30),
+    "row": profile(FINGER_FOREARM=0.25, PULLING_UPPER_BODY=0.75, SYSTEMIC=0.25),
+    "core": profile(SYSTEMIC=0.20),
+}
+DEFAULT_STRENGTH_PROFILE = profile(
+    LOWER_BODY=0.25, PULLING_UPPER_BODY=0.25, NEURAL=0.35, SYSTEMIC=0.35
+)
+CROSSFIT_PROFILE = profile(
+    CARDIOVASCULAR=0.80,
+    LOWER_BODY=0.70,
+    PULLING_UPPER_BODY=0.45,
+    NEURAL=0.40,
+    SYSTEMIC=0.80,
+)
+MOBILITY_PROFILE = profile(SYSTEMIC=0.08)
+
+RUNNING_READINESS_WEIGHTS: dict[FatigueDomain, float] = {
+    FatigueDomain.CARDIOVASCULAR: 0.35,
+    FatigueDomain.LOWER_BODY: 0.35,
+    FatigueDomain.SYSTEMIC: 0.20,
+    FatigueDomain.NEURAL: 0.10,
+}
+CLIMBING_READINESS_WEIGHTS: dict[FatigueDomain, float] = {
+    FatigueDomain.FINGER_FOREARM: 0.40,
+    FatigueDomain.PULLING_UPPER_BODY: 0.25,
+    FatigueDomain.NEURAL: 0.20,
+    FatigueDomain.SYSTEMIC: 0.15,
+}
+
+READINESS_GOOD_THRESHOLD = 7.5
+READINESS_MODERATE_THRESHOLD = 5.0
+SUBJECTIVE_MAX_AGE_HOURS = 36.0
+SUBJECTIVE_WEIGHTS = {
+    "sleep_duration_hours": 0.20,
+    "sleep_quality": 0.20,
+    "energy": 0.25,
+    "stress": 0.15,
+    "general_soreness": 0.20,
+}
+SUBJECTIVE_DELTA_MIN = -1.0
+SUBJECTIVE_DELTA_MAX = 0.75
+FINGER_SORENESS_PENALTY = 0.20
+ELBOW_SORENESS_PENALTY = 0.10
+SHOULDER_SORENESS_PENALTY = 0.10
+FINGER_MODERATE_CAP_THRESHOLD = 3.0
+FINGER_LOW_CAP_THRESHOLD = 6.0
+UPPER_JOINT_SORENESS_BLOCK_THRESHOLD = 6.0
+
+HIGH_FATIGUE_THRESHOLD = 7.5
+VERY_HIGH_FATIGUE_THRESHOLD = 9.0
+MODERATE_FATIGUE_THRESHOLD = 3.0
+HEAVY_DOMAIN_COEFFICIENT = 0.80
+COMPARABLE_SUCCESS_COUNT = 2
+COMPARABLE_SESSION_WINDOW_DAYS = 42
+READINESS_STABILITY_MAX_SPREAD = 2.0
+NO_LATE_DETERIORATION_PACE_FRACTION = 0.03
+QUALITY_HR_STABILITY_MAX_BPM = 8
+MAJOR_LATE_DETERIORATION_PACE_FRACTION = 0.10
+MAJOR_INTERVAL_COMPLETION_FRACTION = 0.75
+LONG_RUN_MAX_INCREASE_FRACTION = 0.10
+VOLUME_REDUCTION_FRACTION = 0.30
+INTENSITY_REDUCTION_FRACTION = 0.05
+
+GYM_COLOUR_ORDINALS = {
+    "Yellow": 1,
+    "Green": 2,
+    "Purple": 3,
+    "Grey": 4,
+    "Blue": 5,
+    "Red": 6,
+    "Black": 7,
+}

@@ -1,0 +1,10 @@
+# Runtime lock strategy: deploy/install from this deliberately bounded list.
+# pyproject.toml remains the source of truth; refresh pins only after the full test suite.
+alembic>=1.14,<2
+fastapi>=0.115,<1
+httpx>=0.28,<1
+pydantic>=2.10,<3
+pydantic-settings>=2.7,<3
+python-multipart>=0.0.20,<1
+sqlalchemy>=2.0.36,<3
+uvicorn[standard]>=0.34,<1
