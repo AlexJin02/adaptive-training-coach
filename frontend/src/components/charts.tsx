@@ -52,7 +52,18 @@ export function LineChart({ data, label, secondaryLabel, formatValue = (value) =
       <Axis min={min} max={max} data={data} yTicks={yTicks} formatYValue={formatYAxisValue} />
       <polyline points={primary} className="chart-line chart-primary" />
       {secondary && <polyline points={secondary} className="chart-line chart-secondary" />}
-      {data.map((point, index) => <g key={`${point.date}-${index}`} className="chart-point"><circle cx={xAt(index, data.length)} cy={yAt(point.value, min, max)} r="4"><title>{`${formatDate(point.date)} · ${label}: ${formatValue(point.value)}${point.confidence ? ` · ${point.confidence} confidence` : ''}`}</title></circle>{point.secondary != null && <circle className="secondary-point" cx={xAt(index, data.length)} cy={yAt(point.secondary, min, max)} r="3"><title>{`${formatDate(point.date)} · ${secondaryLabel}: ${formatValue(point.secondary)}`}</title></circle>}</g>)}
+      {data.map((point, index) => {
+        const x = xAt(index, data.length)
+        const primaryY = yAt(point.value, min, max)
+        const secondaryY = point.secondary == null ? null : yAt(point.secondary, min, max)
+        const description = `${formatDate(point.date)} · ${label}: ${formatValue(point.value)}${point.secondary != null ? ` · ${secondaryLabel}: ${formatValue(point.secondary)}` : ''}${point.confidence ? ` · ${point.confidence} confidence` : ''}`
+        return <g key={`${point.date}-${index}`} className="chart-point chart-hover-target" tabIndex={0} aria-label={description}>
+          <circle className="chart-hit-area" cx={x} cy={primaryY} r="14" />
+          <circle cx={x} cy={primaryY} r="4"><title>{description}</title></circle>
+          <text className="chart-hover-value" x={x} y={Math.max(PAD.top + 11, primaryY - 10)} textAnchor="middle">{formatValue(point.value)}</text>
+          {secondaryY != null && <><circle className="secondary-point" cx={x} cy={secondaryY} r="3" /><text className="chart-hover-value chart-hover-secondary" x={x} y={Math.min(HEIGHT - PAD.bottom - 5, secondaryY + 16)} textAnchor="middle">{formatValue(point.secondary ?? 0)}</text></>}
+        </g>
+      })}
     </svg>
   </div>
 }
@@ -67,7 +78,10 @@ export function BarChart({ data, label, formatValue = (value) => formatNumber(va
     <Axis min={0} max={max} data={data} />
     {data.map((point, index) => {
       const height = (point.value / max) * (HEIGHT - PAD.top - PAD.bottom)
-      return <rect key={`${point.date}-${index}`} className="chart-bar" x={PAD.left + slot * index + (slot - barWidth) / 2} y={HEIGHT - PAD.bottom - height} width={barWidth} height={height} rx="4"><title>{`${formatDate(point.date)} · ${formatValue(point.value)}`}</title></rect>
+      const x = PAD.left + slot * index + (slot - barWidth) / 2
+      const y = HEIGHT - PAD.bottom - height
+      const description = `${formatDate(point.date)} · ${formatValue(point.value)}`
+      return <g key={`${point.date}-${index}`} className="chart-bar-point chart-hover-target" tabIndex={0} aria-label={description}><rect className="chart-bar" x={x} y={y} width={barWidth} height={height} rx="4"><title>{description}</title></rect><text className="chart-hover-value" x={x + barWidth / 2} y={Math.max(PAD.top + 11, y - 8)} textAnchor="middle">{formatValue(point.value)}</text></g>
     })}
   </svg></div>
 }

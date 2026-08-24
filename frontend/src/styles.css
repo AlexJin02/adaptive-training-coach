@@ -389,8 +389,13 @@ input:disabled, select:disabled { color: var(--text-muted); background: var(--su
 .chart-secondary { stroke: var(--run); stroke-dasharray: 6 4; }
 .chart-point circle { fill: var(--surface); stroke: var(--accent); stroke-width: 2; vector-effect: non-scaling-stroke; }
 .chart-point .secondary-point { stroke: var(--run); }
+.chart-point .chart-hit-area { fill: transparent; stroke: none; pointer-events: all; }
 .chart-bar { fill: var(--accent); opacity: .82; }
-.chart-bar:hover { opacity: 1; }
+.chart-bar-point:hover .chart-bar, .chart-bar-point:focus .chart-bar { opacity: 1; }
+.chart-hover-target { outline: none; cursor: default; }
+.chart-hover-value { opacity: 0; pointer-events: none; fill: var(--text); stroke: var(--surface); stroke-width: 4px; paint-order: stroke; font-size: 11px; font-weight: 800; transition: opacity .12s ease; }
+.chart-hover-secondary { fill: var(--run); }
+.chart-hover-target:hover .chart-hover-value, .chart-hover-target:focus .chart-hover-value { opacity: 1; }
 .chart-legend { display: flex; gap: 18px; align-items: center; margin-bottom: 4px; color: var(--text-muted); font-size: .61rem; }
 .chart-legend span { display: flex; gap: 6px; align-items: center; }
 .chart-legend i { width: 16px; height: 2px; background: var(--accent); }

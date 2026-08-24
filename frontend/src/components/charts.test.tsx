@@ -40,6 +40,14 @@ describe('auditable charts', () => {
     expect(screen.getByText('7A')).toBeInTheDocument()
   })
 
+  it('exposes formatted values on hover and keyboard focus targets', () => {
+    const { container } = render(<><LineChart label="Mileage" data={[{ date: '2026-08-01', value: 12.5 }]} formatValue={(value) => `${value} km`} /><BarChart label="Sessions" data={[{ date: 'EASY', value: 3 }]} formatValue={(value) => `${value} runs`} /></>)
+    const hoverValues = [...container.querySelectorAll('.chart-hover-value')].map((element) => element.textContent)
+    expect(hoverValues).toContain('12.5 km')
+    expect(hoverValues).toContain('3 runs')
+    expect(container.querySelectorAll('.chart-hover-target[tabindex="0"]')).toHaveLength(2)
+  })
+
   it('retains colour labels when rendering a gym pyramid', () => {
     render(<GradePyramid rows={[{ label: 'Yellow', value: 8, available: 8, colour: '#e8cf4a' }, { label: 'Blue', value: 1, available: 6, colour: '#4f91ee' }]} mode="percent" />)
     expect(screen.getByText('Yellow')).toBeInTheDocument()
