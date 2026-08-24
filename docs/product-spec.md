@@ -30,7 +30,7 @@ The second product pillar is a lightweight training-knowledge notebook. Text or 
 - A voice note should require only record, review, and save in the happy path.
 - Desktop is data-dense and technical; mobile remains usable for daily logging.
 
-V1 deliberately excludes external Garmin/Strava OAuth, a separate strength dashboard, complex route-fitness or mandatory finger/pulling benchmarks, unrestricted AI plan generation, social/gamified features, and cloud hosting requirements.
+V1 deliberately excludes an in-app Garmin/Strava OAuth connection screen, a separate strength dashboard, complex route-fitness or mandatory finger/pulling benchmarks, unrestricted AI plan generation, social/gamified features, and cloud hosting requirements. Optional Strava run sync uses backend environment credentials and still requires an explicit post-run review before Calendar changes.
 
 ## Initial editable profile
 
@@ -72,11 +72,16 @@ The phases are independent and manually editable. AI may recommend a phase chang
 
 ## Navigation and page acceptance
 
-### 1. Today / Coach
+### 1. Today's Training
 
-This is the default landing page. It shows the date, separate running and climbing readiness, today's planned sessions, relevant fatigue warning, current primary goal, and both phases. Primary actions are Complete Workout, Import Screenshot, Quick Log, Adapt Plan, and Recovery Check-In.
+This is the default landing page and a daily execution view, not another workout-entry form. Each
+active Calendar session appears with its readable prescription beside its current result on desktop
+and stacked on mobile. Results are explicitly `PLANNED`, `NEEDS REVIEW`, or `COMPLETED`; pending
+Strava runs open the existing post-run review, and completed sessions link to the existing Workout
+Log detail. Multiple sessions, rest days, and unplanned completed activities remain distinct.
 
-After a confirmed completion, the application saves the workout, updates athlete state, load, latent fatigue, readiness, planned-versus-actual analysis, and a bounded seven-day adaptation proposal. A provider failure may omit AI commentary but cannot lose the workout or deterministic update.
+When plan and result both exist, the page may show a compact factual planned-versus-actual table.
+It does not calculate a performance score or duplicate the full historical Workout Log.
 
 ### 2. Calendar
 
@@ -96,13 +101,21 @@ The page shows sRPE load trends, the six fatigue domains, decayed component valu
 
 ### 5. Progress
 
-This retrospective page never changes a plan. Running views include calendar-month mileage, rolling 7-day volume, rolling 28-day weekly average, estimated 10K confidence timeline, LT2 pace/HR, and comparable easy-running efficiency. Climbing views include verified TB2 grade labels and home-gym set pyramids with absolute sends and completion percentage when denominators are known. Filters are 4 weeks, 3 months, 6 months, and 1 year.
+This retrospective page never changes a plan. Running views include calendar-month mileage,
+rolling 7-day volume, rolling 28-day weekly average, and comparable easy-running efficiency with
+separate pace/heart-rate labels. Race predictions and LT2 proxy charts are intentionally omitted.
+Climbing views include verified
+TB2 grade labels and home-gym set pyramids with absolute sends and completion percentage when
+denominators are known. Filters are 4 weeks, 3 months, 6 months, and 1 year.
 
 Environmental or workout-condition mismatch is disclosed when an efficiency comparison is weak.
 
 ### 6. Workout Log
 
 The log supports `RUNNING`, `CLIMBING`, `STRENGTH`, `CROSSFIT_CONDITIONING`, and `MOBILITY_RECOVERY`. Common fields are date, start time, duration, RPE, notes, and optional planned-session linkage.
+
+The Workout Log is the historical record and supports date range, sport, session-type, and text
+filters. Entry and import workflows remain here rather than on Today's Training.
 
 Displayed durations use `M:SS` below one hour and `H:MM:SS` from one hour upward. Manual workout, Calendar, and reviewed AI-import duration fields accept either form; a plain number remains a convenient total-minutes input. Running baseline and race-goal times use the same clock input, so the athlete never has to calculate total seconds.
 
@@ -152,6 +165,12 @@ Route benchmark data remains limited to top-rope verified grade, lead verified g
 Screenshot import accepts Garmin Connect, Strava, and comparable activity screenshots. The backend vision function may extract activity type, date, distance, duration, pace, HR, elevation, splits, intervals, cadence, and power. Each extracted field contains value, confidence, and source; unseen fields are `null`.
 
 Natural-language quick entry accepts Chinese, English, and mixed input and produces the same kind of structured preview. Neither workflow writes a completed workout until the athlete corrects and confirms it. Raw screenshots are deleted after successful extraction by default.
+
+Optional Strava sync imports only running activities into the Run Inbox. It preserves objective
+activity metrics and available laps, suggests an exact-date uncompleted running plan when one is
+available, and otherwise remains standalone. The athlete must review run type, add RPE, and may
+record/edit subjective voice feedback before saving. Only that save creates the completed workout
+and marks a matched Calendar plan completed.
 
 ## Plan adaptation
 

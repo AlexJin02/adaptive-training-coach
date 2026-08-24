@@ -1,3 +1,6 @@
+from types import SimpleNamespace
+
+import httpx
 import pytest
 
 from app.ai import functions
@@ -83,6 +86,54 @@ def test_workout_extraction_normalises_voice_friendly_formats(monkeypatch) -> No
     assert result.average_pace.value == "5:08"
     assert result.average_hr.value == 145
     assert result.max_hr.value == 172
+
+
+def test_phone_mp4_transcription_uses_matching_filename_and_content_type(monkeypatch) -> None:  # noqa: ANN001
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        functions,
+        "get_settings",
+        lambda: SimpleNamespace(
+            openai_api_key="test-key", openai_transcribe_model="gpt-4o-mini-transcribe"
+        ),
+    )
+
+    def fake_post(*_args, **kwargs):  # noqa: ANN003, ANN202
+        captured.update(kwargs)
+        return httpx.Response(
+            200,
+            json={"text": "今天 easy run 感觉不错。"},
+            request=httpx.Request("POST", "https://api.openai.com/v1/audio/transcriptions"),
+        )
+
+    monkeypatch.setattr(functions.httpx, "post", fake_post)
+    transcript = functions.transcribe_running_feedback(
+        b"phone-audio", "running-feedback.webm", "audio/mp4;codecs=mp4a.40.2"
+    )
+
+    assert transcript == "今天 easy run 感觉不错。"
+    filename, _audio, media_type = captured["files"]["file"]
+    assert filename == "running-feedback.m4a"
+    assert media_type == "audio/mp4"
+
+
+def test_transcription_exposes_safe_openai_validation_message(monkeypatch) -> None:  # noqa: ANN001
+    monkeypatch.setattr(
+        functions,
+        "get_settings",
+        lambda: SimpleNamespace(
+            openai_api_key="test-key", openai_transcribe_model="gpt-4o-mini-transcribe"
+        ),
+    )
+    response = httpx.Response(
+        400,
+        json={"error": {"message": "Invalid file format."}},
+        request=httpx.Request("POST", "https://api.openai.com/v1/audio/transcriptions"),
+    )
+    monkeypatch.setattr(functions.httpx, "post", lambda *_args, **_kwargs: response)
+
+    with pytest.raises(AIUnavailableError, match="Invalid file format"):
+        functions.transcribe_running_feedback(b"bad-audio", "feedback.webm", "audio/webm")
 
 
 def test_typed_adaptation_contract_rejects_unrestricted_action(monkeypatch) -> None:  # noqa: ANN001

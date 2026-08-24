@@ -5,8 +5,8 @@ import { useResource } from '../api/hooks'
 import { useCapabilities } from '../app/CapabilityProvider'
 import { Icon } from '../components/Icon'
 import { Button, Card, ConfidencePill, EmptyState, ErrorPanel, Field, FormActions, InlineNotice, LoadingGrid, Modal, PageHeader, Pill, SelectField, Tabs, TextAreaField, formatEnum } from '../components/ui'
-import { formatDate, formatDuration, formatNumber, formatRaceTime, localIsoDate, parseDurationInput, recordLabel } from '../lib/format'
-import type { CompletedSession, ExtractionField, WorkoutExtraction, WorkoutKind } from '../types'
+import { formatDate, formatDuration, formatNumber, formatPace, formatRaceTime, localIsoDate, parseDurationInput, recordLabel } from '../lib/format'
+import type { CompletedSession, ExtractionField, ImportedRunningActivity, WorkoutExtraction, WorkoutKind } from '../types'
 
 const runningTypes = ['EASY', 'LONG_RUN', 'QUALITY', 'RACE']
 const climbingTypes = ['BOULDERING', 'SPORT_CLIMBING', 'BOARD']
@@ -19,10 +19,14 @@ export function WorkoutLogPage(): React.JSX.Element {
   const [params, setParams] = useSearchParams()
   const requested = params.get('action')
   const requestedPlanId = params.get('planned_session_id') ?? ''
+  const requestedSessionId = params.get('session_id') ?? ''
   const initialMode: LogMode = requested === 'image' ? 'image' : requested === 'text' ? 'text' : 'manual'
   const [modalOpen, setModalOpen] = useState(Boolean(requested))
   const [mode, setMode] = useState<LogMode>(initialMode)
   const [filter, setFilter] = useState<'ALL' | WorkoutKind>('ALL')
+  const [sessionType, setSessionType] = useState('ALL')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
   const [search, setSearch] = useState('')
   const resource = useResource(api.completedSessions, [])
   useEffect(() => {
@@ -32,12 +36,14 @@ export function WorkoutLogPage(): React.JSX.Element {
     }
   }, [requested])
   const close = () => { setModalOpen(false); setParams({}) }
-  const items = useMemo(() => (resource.data?.items ?? []).filter((session) => (filter === 'ALL' || session.workout_kind === filter) && (!search || `${session.title ?? ''} ${session.session_type} ${session.notes ?? ''}`.toLowerCase().includes(search.toLowerCase()))), [filter, resource.data, search])
+  const sessionTypes = useMemo(() => [...new Set((resource.data?.items ?? []).map((session) => session.session_type))].sort(), [resource.data])
+  const items = useMemo(() => (resource.data?.items ?? []).filter((session) => (filter === 'ALL' || session.workout_kind === filter) && (sessionType === 'ALL' || session.session_type === sessionType) && (!dateFrom || session.date >= dateFrom) && (!dateTo || session.date <= dateTo) && (!search || `${session.title ?? ''} ${session.session_type} ${session.notes ?? ''}`.toLowerCase().includes(search.toLowerCase()))), [dateFrom, dateTo, filter, resource.data, search, sessionType])
 
   return <div className="page workouts-page">
     <PageHeader eyebrow="EVIDENCE" title="Workout Log" description="Fast entry for completed training, with optional detail when it matters." actions={<div className="button-row"><Button variant="ghost" icon="upload" onClick={() => { setMode('image'); setModalOpen(true) }}>Import</Button><Button icon="plus" onClick={() => { setMode('manual'); setModalOpen(true) }}>Log workout</Button></div>} />
-    <Card className="filter-bar"><div className="search-field"><Icon name="search" /><input aria-label="Search workouts" placeholder="Search sessions or notes" value={search} onChange={(event) => setSearch(event.target.value)} /></div><SelectField label="Activity filter" className="compact-field" value={filter} onChange={(event) => setFilter(event.target.value as typeof filter)}><option value="ALL">All activities</option><option value="RUNNING">Running</option><option value="CLIMBING">Climbing</option><option value="STRENGTH">Strength</option><option value="CROSSFIT_CONDITIONING">CrossFit / conditioning</option><option value="MOBILITY_RECOVERY">Mobility / recovery</option></SelectField></Card>
-    {resource.loading ? <LoadingGrid count={5} /> : resource.error ? <ErrorPanel message={resource.error.message} onRetry={resource.reload} /> : items.length ? <div className="workout-table"><div className="workout-row workout-head"><span>Date</span><span>Activity</span><span>Session</span><span>Duration</span><span>Details</span></div>{items.map((session) => <WorkoutRow key={session.id} session={session} onChanged={resource.reload} />)}</div> : <EmptyState icon="workouts" title="No matching workouts" message="A basic session only needs date and duration. RPE and detailed evidence are optional." action={<Button icon="plus" onClick={() => setModalOpen(true)}>Log first workout</Button>} />}
+    <RunInbox onCompleted={() => resource.reload()} />
+    <Card className="filter-bar workout-filters"><div className="search-field"><Icon name="search" /><input aria-label="Search workouts" placeholder="Search sessions or notes" value={search} onChange={(event) => setSearch(event.target.value)} /></div><Field label="From" type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} /><Field label="To" type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} /><SelectField label="Sport" className="compact-field" value={filter} onChange={(event) => setFilter(event.target.value as typeof filter)}><option value="ALL">All sports</option><option value="RUNNING">Running</option><option value="CLIMBING">Climbing</option><option value="STRENGTH">Strength</option><option value="CROSSFIT_CONDITIONING">CrossFit / conditioning</option><option value="MOBILITY_RECOVERY">Mobility / recovery</option></SelectField><SelectField label="Session type" className="compact-field" value={sessionType} onChange={(event) => setSessionType(event.target.value)}><option value="ALL">All session types</option>{sessionTypes.map((type) => <option key={type} value={type}>{formatEnum(type)}</option>)}</SelectField></Card>
+    {resource.loading ? <LoadingGrid count={5} /> : resource.error ? <ErrorPanel message={resource.error.message} onRetry={resource.reload} /> : items.length ? <div className="workout-table"><div className="workout-row workout-head"><span>Date</span><span>Activity</span><span>Session</span><span>Duration</span><span>Details</span></div>{items.map((session) => <WorkoutRow key={session.id} session={session} initialOpen={String(session.id) === requestedSessionId} onClose={() => { if (String(session.id) === requestedSessionId) setParams({}) }} onChanged={resource.reload} />)}</div> : <EmptyState icon="workouts" title="No matching workouts" message="A basic session only needs date and duration. RPE and detailed evidence are optional." action={<Button icon="plus" onClick={() => setModalOpen(true)}>Log first workout</Button>} />}
     <Modal open={modalOpen} title="Record completed training" onClose={close} wide>
       <Tabs label="Workout input method" value={mode} onChange={setMode} items={[{ value: 'manual', label: 'Manual' }, { value: 'image', label: 'Screenshot' }, { value: 'text', label: 'Quick text' }]} />
       {mode === 'manual' ? <ManualWorkoutForm initial={{ planned_session_id: requestedPlanId }} onSaved={() => { close(); resource.reload() }} /> : mode === 'image' ? <ScreenshotImport onSaved={() => { close(); resource.reload() }} onManual={() => setMode('manual')} /> : <TextImport onSaved={() => { close(); resource.reload() }} onManual={() => setMode('manual')} />}
@@ -45,8 +51,80 @@ export function WorkoutLogPage(): React.JSX.Element {
   </div>
 }
 
-function WorkoutRow({ session, onChanged }: { session: CompletedSession; onChanged: () => void }): React.JSX.Element {
-  const [open, setOpen] = useState(false)
+function RunInbox({ onCompleted }: { onCompleted: () => void }): React.JSX.Element {
+  const { capabilities } = useCapabilities()
+  const resource = useResource(api.stravaRunInbox, [])
+  const [selected, setSelected] = useState<ImportedRunningActivity | null>(null)
+  const [syncing, setSyncing] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
+  const sync = async () => {
+    setSyncing(true); setMessage(null)
+    try {
+      const result = await api.syncStravaRuns()
+      const updates = [
+        result.imported ? `${result.imported} new run${result.imported === 1 ? '' : 's'} added` : null,
+        result.restored ? `${result.restored} missing Workout Log run${result.restored === 1 ? '' : 's'} returned` : null,
+        result.enriched ? `${result.enriched} run${result.enriched === 1 ? '' : 's'} updated with Strava performance data` : null,
+      ].filter(Boolean)
+      setMessage(updates.length ? `${updates.join(' · ')} for review.` : 'Strava and Workout Log are up to date.')
+      resource.setData({ items: result.items, total: result.total })
+    } catch (reason) {
+      setMessage(reason instanceof ApiError ? reason.message : 'Unable to sync Strava.')
+    } finally { setSyncing(false) }
+  }
+  const complete = () => {
+    setSelected(null)
+    resource.reload()
+    onCompleted()
+  }
+  const items = resource.data?.items ?? []
+  return <Card className="run-inbox">
+    <div className="run-inbox-heading"><div><span className="eyebrow">STRAVA</span><h2>Run Inbox</h2><p>Imported runs stay here until you add RPE and confirm the completed workout.</p></div><Button variant="ghost" icon="arrow" disabled={syncing || !capabilities.strava_sync_configured} onClick={() => void sync()}>{syncing ? 'Syncing…' : 'Sync Strava'}</Button></div>
+    {!capabilities.strava_sync_configured && <InlineNotice title="Strava sync is not configured">{capabilities.strava_sync_reason ?? 'Add Strava credentials to the backend .env, then restart the server.'}</InlineNotice>}
+    {message && <InlineNotice tone={message.includes('Unable') || message.includes('failed') ? 'warning' : 'success'}>{message}</InlineNotice>}
+    {resource.loading ? <LoadingGrid count={1} /> : resource.error ? <ErrorPanel message={resource.error.message} onRetry={resource.reload} /> : items.length ? <div className="run-inbox-list">{items.map((run) => <article className="run-inbox-item" key={run.id}><div><strong>{run.title}</strong><span>{formatDate(run.date)}{run.start_time ? ` · ${run.start_time.slice(0, 5)}` : ''}</span>{run.planned_session ? <small>Matched: {run.planned_session.title}</small> : <small>Standalone run · no planned session matched</small>}</div><div className="run-inbox-metrics"><span><strong>{formatNumber(run.distance_km, 2)}</strong> km</span><span><strong>{formatRaceTime(run.elapsed_time_seconds)}</strong> elapsed</span><span><strong>{formatPace(run.average_pace_seconds_per_km)}</strong> /km</span></div><Button onClick={() => setSelected(run)}>Complete Review</Button></article>)}</div> : <p className="muted">No Strava runs are waiting for review.</p>}
+    <Modal open={Boolean(selected)} title="Post-Run Review" onClose={() => setSelected(null)} wide>{selected && <StravaRunReview run={selected} onSaved={complete} />}</Modal>
+  </Card>
+}
+
+export function StravaRunReview({ run, onSaved }: { run: ImportedRunningActivity; onSaved: () => void }): React.JSX.Element {
+  const [sessionType, setSessionType] = useState(run.suggested_session_type)
+  const [title, setTitle] = useState(run.planned_session?.title ?? run.title)
+  const [rpe, setRpe] = useState<number | null>(null)
+  const [feedbackText, setFeedbackText] = useState('')
+  const [feedbackSource, setFeedbackSource] = useState<'VOICE' | 'TEXT' | 'NONE'>('NONE')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const save = async () => {
+    if (rpe == null) { setError('Choose an RPE from 1 to 10 before saving.'); return }
+    setBusy(true); setError(null)
+    try {
+      await api.completeStravaRun(run.id, { session_type: sessionType, title: title.trim() || run.title, rpe, subjective_feedback_text: feedbackText.trim() || null, subjective_feedback_source: feedbackText.trim() ? feedbackSource === 'NONE' ? 'TEXT' : feedbackSource : 'NONE' })
+      onSaved()
+    } catch (reason) {
+      setError(reason instanceof ApiError ? reason.message : 'Unable to save this imported run.')
+    } finally { setBusy(false) }
+  }
+  return <div className="post-run-review stack-form">
+    {run.planned_session ? <InlineNotice tone="success" title="Matched planned session">{run.planned_session.title} · {formatEnum(run.planned_session.session_type)}. Saving will mark this Calendar session completed while preserving its prescription.</InlineNotice> : <InlineNotice title="Standalone run">No same-date planned running session was available. Saving will create a standalone completed workout.</InlineNotice>}
+    <Card title="Objective activity data"><div className="form-grid four"><div><span className="field-label">Date</span><strong>{formatDate(run.date)}</strong></div><div><span className="field-label">Distance</span><strong>{formatNumber(run.distance_km, 2)} km</strong></div><div><span className="field-label">Elapsed time</span><strong>{formatRaceTime(run.elapsed_time_seconds)}</strong></div><div><span className="field-label">Average pace</span><strong>{formatPace(run.average_pace_seconds_per_km)} /km</strong></div><div><span className="field-label">Average HR</span><strong>{run.average_hr ?? 'Not available'}</strong></div><div><span className="field-label">Max HR</span><strong>{run.max_hr ?? 'Not available'}</strong></div><div><span className="field-label">Elevation</span><strong>{run.elevation_m != null ? `${formatNumber(run.elevation_m)} m` : 'Not available'}</strong></div><div><span className="field-label">Cadence</span><strong>{run.cadence != null ? `${formatNumber(run.cadence)} spm` : 'Not available'}</strong></div></div></Card>
+    <div className="form-grid two"><SelectField label="Run type" value={sessionType} onChange={(event) => setSessionType(event.target.value as typeof sessionType)}>{runningTypes.map((item) => <option key={item} value={item}>{formatEnum(item)}</option>)}</SelectField><Field label="Workout title" value={title} onChange={(event) => setTitle(event.target.value)} /></div>
+    <StravaLapTable run={run} />
+    <fieldset className="rpe-picker"><legend>RPE · required</legend><p className="muted">1 is very easy; 10 is maximal.</p><div>{Array.from({ length: 10 }, (_, index) => index + 1).map((value) => <button type="button" aria-pressed={rpe === value} className={rpe === value ? 'selected' : ''} key={value} onClick={() => setRpe(value)}>{value}</button>)}</div></fieldset>
+    <RunningFeedbackRecorder text={feedbackText} source={feedbackSource} onChange={(text, source) => { setFeedbackText(text); setFeedbackSource(source) }} />
+    {error && <InlineNotice tone="warning">{error} The run remains in your Inbox.</InlineNotice>}
+    <FormActions><Button disabled={busy || rpe == null} onClick={() => void save()}>{busy ? 'Saving…' : 'Save Completed Workout'}</Button></FormActions>
+  </div>
+}
+
+function StravaLapTable({ run }: { run: ImportedRunningActivity }): React.JSX.Element {
+  if (!run.laps.length) return <Card title="Strava laps"><p className="muted">No lap data was available for this activity.</p></Card>
+  return <Card title="Strava laps"><div className="lap-table"><div className="lap-row lap-head"><span>Lap</span><span>Distance</span><span>Elapsed</span><span>Pace</span><span>Avg HR</span><span>Cadence</span></div>{run.laps.map((lap) => <div className="lap-row" key={lap.lap_index}><span data-label="Lap">{lap.lap_index}</span><span data-label="Distance">{formatNumber(lap.distance_km, 2)} km</span><span data-label="Elapsed">{formatRaceTime(lap.elapsed_time_seconds)}</span><span data-label="Pace">{formatPace(lap.pace_seconds_per_km)} /km</span><span data-label="Avg HR">{lap.average_hr ?? '—'}</span><span data-label="Cadence">{lap.cadence != null ? `${formatNumber(lap.cadence)} spm` : '—'}</span></div>)}</div></Card>
+}
+
+function WorkoutRow({ session, onChanged, initialOpen = false, onClose }: { session: CompletedSession; onChanged: () => void; initialOpen?: boolean; onClose?: () => void }): React.JSX.Element {
+  const [open, setOpen] = useState(initialOpen)
+  useEffect(() => { if (initialOpen) setOpen(true) }, [initialOpen])
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -55,15 +133,16 @@ function WorkoutRow({ session, onChanged }: { session: CompletedSession; onChang
   const workoutName = session.workout_name ?? strength?.workout_name
   const rounds = session.rounds ?? strength?.rounds
   const resultTime = session.result_time_seconds ?? strength?.result_time_seconds
-  const deleteRecord = async () => { setBusy(true); setError(null); try { await api.deleteCompletedSession(session.id); setOpen(false); onChanged() } catch (reason) { setError(reason instanceof ApiError ? reason.message : 'Unable to delete this workout.') } finally { setBusy(false) } }
+  const closeDetail = () => { setOpen(false); onClose?.() }
+  const deleteRecord = async () => { setBusy(true); setError(null); try { await api.deleteCompletedSession(session.id); closeDetail(); onChanged() } catch (reason) { setError(reason instanceof ApiError ? reason.message : 'Unable to delete this workout.') } finally { setBusy(false) } }
   return <>
     <article className="workout-row"><span data-label="Date">{formatDate(session.date)}</span><span data-label="Activity"><Pill tone={session.workout_kind === 'RUNNING' ? 'run' : session.workout_kind === 'CLIMBING' ? 'climb' : 'neutral'}>{formatEnum(session.workout_kind)}</Pill>{session.is_demo && <Pill tone="moderate">DEMO</Pill>}</span><span data-label="Session"><strong>{session.title ?? formatEnum(session.session_type)}</strong><small>{session.distance_km ? `${formatNumber(session.distance_km, 1)} km` : session.board_name ?? session.gym_or_crag ?? workoutName ?? ''}</small></span><span data-label="Duration">{formatDuration(session.duration_minutes)}<small>{session.rpe ? `RPE ${session.rpe}` : 'RPE not recorded'}</small></span><span data-label="Details"><Button variant="ghost" aria-label={`View ${session.title ?? session.session_type}`} icon="chevron" onClick={() => setOpen(true)} /></span></article>
-    <Modal open={open} title={session.title ?? formatEnum(session.session_type)} onClose={() => setOpen(false)}><div className="stack-form">
+    <Modal open={open} title={session.title ?? formatEnum(session.session_type)} onClose={closeDetail} wide><div className="stack-form">
       {session.is_demo && <Pill tone="moderate">DEMO DATA</Pill>}
-      <div className="form-grid three"><div><span className="field-label">Date</span><strong>{formatDate(session.date)}</strong></div><div><span className="field-label">Duration</span><strong>{formatDuration(session.duration_minutes)}</strong></div><div><span className="field-label">RPE</span><strong>{session.rpe ?? 'Not recorded'}</strong></div>{session.distance_km != null && <div><span className="field-label">Distance</span><strong>{formatNumber(session.distance_km, 2)} km</strong></div>}{session.average_hr != null && <div><span className="field-label">Heart rate</span><strong>{session.average_hr} avg{session.max_hr ? ` · ${session.max_hr} max` : ''}</strong></div>}{session.gym_or_crag && <div><span className="field-label">Gym / crag</span><strong>{session.gym_or_crag}</strong></div>}{session.board_name && <div><span className="field-label">Board</span><strong>{session.board_name}{session.angle != null ? ` · ${session.angle}°` : ''}</strong></div>}{workoutName && <div><span className="field-label">Workout</span><strong>{workoutName}</strong></div>}{rounds != null && <div><span className="field-label">Rounds</span><strong>{formatNumber(rounds, 1)}</strong></div>}{resultTime != null && <div><span className="field-label">Result time</span><strong>{formatRaceTime(resultTime)}</strong></div>}</div>
-      <DetailRecords title="Splits" records={session.splits} />
+      <div className="form-grid three"><div><span className="field-label">Date</span><strong>{formatDate(session.date)}</strong></div><div><span className="field-label">Duration</span><strong>{formatDuration(session.duration_minutes)}</strong></div><div><span className="field-label">RPE</span><strong>{session.rpe ?? 'Not recorded'}</strong></div>{session.distance_km != null && <div><span className="field-label">Distance</span><strong>{formatNumber(session.distance_km, 2)} km</strong></div>}{session.average_hr != null && <div><span className="field-label">Heart rate</span><strong>{session.average_hr} avg{session.max_hr ? ` · ${session.max_hr} max` : ''}</strong></div>}{session.cadence != null && <div><span className="field-label">Cadence</span><strong>{formatNumber(session.cadence)} spm</strong></div>}{session.gym_or_crag && <div><span className="field-label">Gym / crag</span><strong>{session.gym_or_crag}</strong></div>}{session.board_name && <div><span className="field-label">Board</span><strong>{session.board_name}{session.angle != null ? ` · ${session.angle}°` : ''}</strong></div>}{workoutName && <div><span className="field-label">Workout</span><strong>{workoutName}</strong></div>}{rounds != null && <div><span className="field-label">Rounds</span><strong>{formatNumber(rounds, 1)}</strong></div>}{resultTime != null && <div><span className="field-label">Result time</span><strong>{formatRaceTime(resultTime)}</strong></div>}</div>
+      <CompletedLapTable records={session.splits} />
       <DetailRecords title="Intervals" records={session.interval_blocks} />
-      <DetailRecords title="Climbing attempts" records={session.climbing_attempts} />
+      <ClimbingAttemptTable records={session.climbing_attempts} />
       <DetailRecords title="Strength sets" records={strengthSets} />
       {session.notes && <Card title="Session notes"><p>{session.notes}</p></Card>}
       {session.subjective_feedback_text && <Card title="How this run felt"><p>{session.subjective_feedback_text}</p><p className="card-note">{session.subjective_feedback_source === 'VOICE' ? 'Voice transcript, reviewed by athlete' : 'Written by athlete'}</p></Card>}
@@ -71,6 +150,73 @@ function WorkoutRow({ session, onChanged }: { session: CompletedSession; onChang
       {confirmDelete ? <InlineNotice tone="warning" title="Permanently delete this workout?"><p>This cannot be undone. The workout and its detailed evidence will be removed, and training calculations will be updated.</p><div className="button-row"><Button variant="ghost" disabled={busy} onClick={() => setConfirmDelete(false)}>Cancel</Button><Button variant="danger" disabled={busy} onClick={() => void deleteRecord()}>{busy ? 'Deleting…' : 'Delete permanently'}</Button></div></InlineNotice> : <FormActions><Button variant="danger" onClick={() => setConfirmDelete(true)}>Delete workout</Button></FormActions>}
     </div></Modal>
   </>
+}
+
+function CompletedLapTable({ records }: { records?: Array<Record<string, unknown>> }): React.JSX.Element | null {
+  if (!records?.length) return null
+  return <Card title="Lap details"><div className="lap-table completed-lap-table">
+    <div className="lap-row completed-lap-row lap-head"><span>Lap</span><span>Distance</span><span>Elapsed</span><span>Pace</span><span>Avg HR</span><span>Cadence</span></div>
+    {records.map((record, index) => {
+      const distance = numberFrom(record.distance_km ?? record.distance)
+      const elapsedSeconds = numberFrom(record.elapsed_time_seconds)
+      const elapsedText = elapsedSeconds != null ? formatRaceTime(elapsedSeconds) : stringFrom(record.time ?? record.elapsed_time)
+      const explicitPace = numberFrom(record.pace_seconds_per_km)
+      const calculatedPace = explicitPace ?? (distance && elapsedText ? durationTextSeconds(elapsedText) / distance : null)
+      const paceText = calculatedPace != null && Number.isFinite(calculatedPace) ? `${formatPace(calculatedPace)} /km` : paceString(record.pace)
+      const heartRate = numberFrom(record.average_hr ?? record.hr)
+      const cadence = numberFrom(record.cadence)
+      return <div className="lap-row completed-lap-row" key={`${String(record.lap_index ?? index + 1)}-${index}`}>
+        <span data-label="Lap">{String(record.lap_index ?? index + 1)}</span>
+        <span data-label="Distance">{distance != null ? `${formatNumber(distance, 2)} km` : '—'}</span>
+        <span data-label="Elapsed">{elapsedText || '—'}</span>
+        <span data-label="Pace">{paceText || '—'}</span>
+        <span data-label="Avg HR">{heartRate != null ? `${formatNumber(heartRate)} bpm` : '—'}</span>
+        <span data-label="Cadence">{cadence != null ? `${formatNumber(cadence)} spm` : '—'}</span>
+      </div>
+    })}
+  </div></Card>
+}
+
+function ClimbingAttemptTable({ records }: { records?: Array<Record<string, unknown>> }): React.JSX.Element | null {
+  if (!records?.length) return null
+  return <Card title="Climbing attempts"><div className="attempt-table">
+    <div className="attempt-row attempt-head"><span>Problem</span><span>Grade</span><span>Attempts</span><span>Sends</span><span>Result</span><span>Styles</span></div>
+    {records.map((record, index) => {
+      const sent = record.sent === true
+      const sends = numberFrom(record.send_count ?? record.sends) ?? (sent ? 1 : 0)
+      const styles = Array.isArray(record.style_tags ?? record.styles) ? (record.style_tags ?? record.styles) as unknown[] : []
+      const result = stringFrom(record.outcome) || (record.flash === true ? 'Flash' : record.repeat === true ? 'Repeat' : record.project === true ? 'Project' : sent || sends > 0 ? 'Sent' : 'Not sent')
+      return <div className="attempt-row" key={`${String(record.id ?? record.problem ?? index)}-${index}`}>
+        <span data-label="Problem">{stringFrom(record.problem) || `Problem ${index + 1}`}</span>
+        <span data-label="Grade">{stringFrom(record.grade ?? record.grade_or_colour ?? record.colour) || '—'}</span>
+        <span data-label="Attempts">{numberFrom(record.attempts ?? record.attempt_count) ?? '—'}</span>
+        <span data-label="Sends">{sends}</span>
+        <span data-label="Result">{formatEnum(result)}</span>
+        <span data-label="Styles">{styles.length ? styles.map(String).join(', ') : '—'}</span>
+      </div>
+    })}
+  </div></Card>
+}
+
+function numberFrom(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) return Number(value)
+  return null
+}
+
+function stringFrom(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function durationTextSeconds(value: string): number {
+  return (parseDurationInput(value) ?? Number.NaN) * 60
+}
+
+function paceString(value: unknown): string {
+  if (typeof value === 'number' && Number.isFinite(value)) return `${formatPace(value)} /km`
+  const text = stringFrom(value)
+  if (!text) return ''
+  return /\/km$/i.test(text) ? text.replace(/\/km$/i, ' /km') : `${text} /km`
 }
 
 function DetailRecords({ title, records }: { title: string; records?: Array<Record<string, unknown>> }): React.JSX.Element | null {
@@ -148,7 +294,7 @@ function ManualWorkoutForm({ onSaved, initial }: { onSaved: () => void; initial?
 
 function RunningFields({ form, set, advanced, intervals, setIntervals, splits, setSplits }: { form: WorkoutDraft; set: (key: keyof WorkoutDraft, value: string) => void; advanced: boolean; intervals: { phase: string; detail: string }[]; setIntervals: React.Dispatch<React.SetStateAction<{ phase: string; detail: string }[]>>; splits: { distance: string; time: string; hr: string }[]; setSplits: React.Dispatch<React.SetStateAction<{ distance: string; time: string; hr: string }[]>> }): React.JSX.Element {
   const structured = form.session_type === 'QUALITY'
-  return <><div className="form-grid four"><Field label="Distance (km)" type="number" min="0" step="0.01" value={form.distance_km} onChange={(event) => set('distance_km', event.target.value)} /><Field label="Average pace" placeholder="5:12 /km" value={form.average_pace} onChange={(event) => set('average_pace', event.target.value)} /><Field label="Average HR" type="number" min="0" value={form.average_hr} onChange={(event) => set('average_hr', event.target.value)} /><Field label="Max HR" type="number" min="0" value={form.max_hr} onChange={(event) => set('max_hr', event.target.value)} /></div>{advanced && <div className="form-grid three"><Field label="Elevation (m)" type="number" value={form.elevation_m} onChange={(event) => set('elevation_m', event.target.value)} /><Field label="Cadence" type="number" value={form.cadence} onChange={(event) => set('cadence', event.target.value)} /><Field label="Power (W)" type="number" value={form.power_w} onChange={(event) => set('power_w', event.target.value)} /></div>}{structured && <div className="subform"><div className="subform-header"><div><strong>Structured blocks</strong><span>Warm-up, main work and cooldown</span></div><Button type="button" variant="ghost" icon="plus" onClick={() => setIntervals((current) => [...current, { phase: 'Main', detail: '' }])}>Block</Button></div>{intervals.map((block, index) => <div className="inline-editor" key={`${block.phase}-${index}`}><select aria-label={`Block ${index + 1} phase`} value={block.phase} onChange={(event) => setIntervals((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, phase: event.target.value } : item))}><option>Warmup</option><option>Main</option><option>Cooldown</option></select><input aria-label={`Block ${index + 1} detail`} value={block.detail} onChange={(event) => setIntervals((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, detail: event.target.value } : item))} /><Button type="button" variant="ghost" icon="trash" aria-label="Remove block" onClick={() => setIntervals((current) => current.filter((_, itemIndex) => itemIndex !== index))} /></div>)}</div>}{advanced && <div className="subform"><div className="subform-header"><div><strong>Splits</strong><span>Optional lap evidence</span></div><Button type="button" variant="ghost" icon="plus" onClick={() => setSplits((current) => [...current, { distance: '1', time: '', hr: '' }])}>Split</Button></div>{splits.map((split, index) => <div className="inline-editor four" key={index}><input aria-label={`Split ${index + 1} distance`} placeholder="km" value={split.distance} onChange={(event) => setSplits((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, distance: event.target.value } : item))} /><input aria-label={`Split ${index + 1} time`} placeholder="time" value={split.time} onChange={(event) => setSplits((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, time: event.target.value } : item))} /><input aria-label={`Split ${index + 1} HR`} placeholder="HR" value={split.hr} onChange={(event) => setSplits((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, hr: event.target.value } : item))} /><Button type="button" variant="ghost" icon="trash" aria-label="Remove split" onClick={() => setSplits((current) => current.filter((_, itemIndex) => itemIndex !== index))} /></div>)}</div>}</>
+  return <><div className="form-grid four"><Field label="Distance (km)" type="number" min="0" step="0.01" value={form.distance_km} onChange={(event) => set('distance_km', event.target.value)} /><Field label="Average pace" placeholder="5:12 /km" value={form.average_pace} onChange={(event) => set('average_pace', event.target.value)} /><Field label="Average HR" type="number" min="0" value={form.average_hr} onChange={(event) => set('average_hr', event.target.value)} /><Field label="Max HR" type="number" min="0" value={form.max_hr} onChange={(event) => set('max_hr', event.target.value)} /></div>{advanced && <div className="form-grid three"><Field label="Elevation (m)" type="number" value={form.elevation_m} onChange={(event) => set('elevation_m', event.target.value)} /><Field label="Cadence (spm)" type="number" value={form.cadence} onChange={(event) => set('cadence', event.target.value)} /><Field label="Power (W)" type="number" value={form.power_w} onChange={(event) => set('power_w', event.target.value)} /></div>}{structured && <div className="subform"><div className="subform-header"><div><strong>Structured blocks</strong><span>Warm-up, main work and cooldown</span></div><Button type="button" variant="ghost" icon="plus" onClick={() => setIntervals((current) => [...current, { phase: 'Main', detail: '' }])}>Block</Button></div>{intervals.map((block, index) => <div className="inline-editor" key={`${block.phase}-${index}`}><select aria-label={`Block ${index + 1} phase`} value={block.phase} onChange={(event) => setIntervals((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, phase: event.target.value } : item))}><option>Warmup</option><option>Main</option><option>Cooldown</option></select><input aria-label={`Block ${index + 1} detail`} value={block.detail} onChange={(event) => setIntervals((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, detail: event.target.value } : item))} /><Button type="button" variant="ghost" icon="trash" aria-label="Remove block" onClick={() => setIntervals((current) => current.filter((_, itemIndex) => itemIndex !== index))} /></div>)}</div>}{advanced && <div className="subform"><div className="subform-header"><div><strong>Splits</strong><span>Optional lap evidence</span></div><Button type="button" variant="ghost" icon="plus" onClick={() => setSplits((current) => [...current, { distance: '1', time: '', hr: '' }])}>Split</Button></div>{splits.map((split, index) => <div className="inline-editor four" key={index}><input aria-label={`Split ${index + 1} distance`} placeholder="km" value={split.distance} onChange={(event) => setSplits((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, distance: event.target.value } : item))} /><input aria-label={`Split ${index + 1} time`} placeholder="time" value={split.time} onChange={(event) => setSplits((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, time: event.target.value } : item))} /><input aria-label={`Split ${index + 1} HR`} placeholder="HR" value={split.hr} onChange={(event) => setSplits((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, hr: event.target.value } : item))} /><Button type="button" variant="ghost" icon="trash" aria-label="Remove split" onClick={() => setSplits((current) => current.filter((_, itemIndex) => itemIndex !== index))} /></div>)}</div>}</>
 }
 
 function ClimbingFields({ form, set, advanced, problems, setProblems }: { form: WorkoutDraft; set: (key: keyof WorkoutDraft, value: string) => void; advanced: boolean; problems: { problem: string; grade: string; attempts: string; send_count: string; styles: string[] }[]; setProblems: React.Dispatch<React.SetStateAction<{ problem: string; grade: string; attempts: string; send_count: string; styles: string[] }[]>> }): React.JSX.Element {
@@ -207,7 +353,7 @@ function QuickTextVoiceRecorder({ disabled, onTranscript }: { disabled: boolean;
   return <Card className="quick-text-voice" title="Voice input"><p className="muted">Optional. The transcript is inserted above for editing before extraction.</p><div className="button-row">{recording ? <Button variant="danger" onClick={stop}>Stop</Button> : <Button icon="mic" disabled={disabled || busy} onClick={() => void start()}>{audio ? 'Re-record' : 'Record'}</Button>}{audio && <Button disabled={busy} onClick={() => void transcribe()}>{busy ? 'Transcribing…' : 'Insert transcript'}</Button>}{audio && <Button variant="ghost" disabled={busy} onClick={remove}>Delete recording</Button>}</div>{disabled && <InlineNotice title="Voice input unavailable">Configure the backend OpenAI API key to enable transcription.</InlineNotice>}{error && <InlineNotice tone="warning">{error}</InlineNotice>}</Card>
 }
 
-const extractionLabels: Record<keyof WorkoutExtraction, string> = { workout_kind: 'Workout kind', activity_type: 'Activity label', session_type: 'Session type', title: 'Title', date: 'Date', distance_km: 'Distance (km)', duration_minutes: 'Duration', rpe: 'RPE (1–10)', average_pace: 'Average pace', average_hr: 'Average HR', max_hr: 'Max HR', elevation_m: 'Elevation (m)', cadence: 'Cadence', power_w: 'Power (W)', board_name: 'Board', angle: 'Angle (°)', splits: 'Splits', intervals: 'Intervals', notes: 'Notes' }
+const extractionLabels: Record<keyof WorkoutExtraction, string> = { workout_kind: 'Workout kind', activity_type: 'Activity label', session_type: 'Session type', title: 'Title', date: 'Date', distance_km: 'Distance (km)', duration_minutes: 'Duration', rpe: 'RPE (1–10)', average_pace: 'Average pace', average_hr: 'Average HR', max_hr: 'Max HR', elevation_m: 'Elevation (m)', cadence: 'Cadence (spm)', power_w: 'Power (W)', board_name: 'Board', angle: 'Angle (°)', splits: 'Splits', intervals: 'Intervals', notes: 'Notes' }
 
 function missingField<T>(source = 'not detected'): ExtractionField<T | null> { return { value: null, confidence: 'LOW', source } }
 

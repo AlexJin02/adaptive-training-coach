@@ -198,17 +198,16 @@ rolling_28d_weekly_average = distance_last_28_days / 4
 
 Current month, previous month, rolling 7-day, and rolling 28-day values remain separate.
 
-A 10K race-equivalent may use Riegel when evidence is suitable:
+Progress does not render race predictions or an LT2 proxy. The former database-backed estimate
+generators remain removed; legacy/manual estimate rows exist only for data compatibility and are not
+rendered on Progress. Confirmed Strava evidence continues to support factual workout history,
+weekly/monthly volume, and comparable-HR easy-efficiency trends.
 
-```text
-target_time = source_time * (target_distance / source_distance) ^ 1.06
-```
-
-The implemented estimator appends evidence for a 3–50 km `Race` or `Time Trial`. It records an actual result for 9.95–10.05 km and otherwise applies Riegel with high confidence; an actual 10K from the last 90 days overrides other estimates. Repeated quality-session inference is not implemented. With no eligible event, time is `null` and display text is `Not enough data`.
-
-The implemented LT2 row is appended from a completed Threshold, Tempo, or Cruise Intervals session when pace or heart rate is present. LT1 is derived only after at least three recent Easy, Recovery, or Steady sessions at RPE 4 or lower contain both pace and heart rate; it stores the observed pace/HR ranges with moderate confidence. Typed API endpoints can also append manual 10K and LT1/LT2 evidence. A Garmin-specific import path and AI-assisted estimate source are not implemented.
-
-Easy-efficiency trends use Easy/Recovery runs within ±3 bpm of the median easy-run heart rate and require at least three comparable points. The UI always warns that weather, terrain, and workout conditions may differ; it does not yet test those metadata fields automatically.
+Easy-efficiency trends use Easy/Recovery runs within ±3 bpm of the median easy-run heart rate and
+require at least three comparable points. Progress displays the exact comparison band and a table
+with date, average pace, average heart rate, and Strava/Workout Log source. The UI always warns that
+weather, terrain, and workout conditions may differ; it does not yet test those metadata fields
+automatically.
 
 ## Climbing state calculations
 

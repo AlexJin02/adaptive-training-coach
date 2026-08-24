@@ -16,14 +16,8 @@ export const capabilitiesOff: ApiCapabilities = {
 
 export const todayFixture: TodayDashboard = {
   date: '2026-08-23',
-  goal: { id: 1, goal_type: 'HALF_MARATHON', description: 'Sub 1:30', target_value: '1:29:59', is_current: true },
-  running_phase: 'AEROBIC_BASE',
-  climbing_phase: 'MAX_STRENGTH',
-  running_readiness: { sport: 'RUNNING', label: 'GOOD', value: 8.1, components: [{ domain: 'CARDIOVASCULAR', value: 8.4, label: 'GOOD' }, { domain: 'LOWER_BODY', value: 7.8, label: 'GOOD' }] },
-  climbing_readiness: { sport: 'CLIMBING', label: 'MODERATE', value: 6.2, components: [{ domain: 'FINGER_FOREARM', value: 5.5, label: 'MODERATE' }, { domain: 'NEURAL', value: 6.8, label: 'MODERATE' }] },
   sessions: [],
-  fatigue_warnings: [],
-  pending_adaptations: [],
+  imported_runs: [],
 }
 
 export function installFetchMock(): ReturnType<typeof vi.fn> {

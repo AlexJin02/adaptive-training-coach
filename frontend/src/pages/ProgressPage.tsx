@@ -3,7 +3,7 @@ import { api } from '../api/client'
 import { useResource } from '../api/hooks'
 import { BarChart, GradePyramid, LineChart } from '../components/charts'
 import { Button, Card, EmptyState, ErrorPanel, InlineNotice, LoadingGrid, Metric, PageHeader, SectionHeading, Tabs } from '../components/ui'
-import { formatDate, formatDuration, formatPace, formatRaceTime } from '../lib/format'
+import { formatDate, formatDuration, formatPace } from '../lib/format'
 import type { GymSet, ProgressData } from '../types'
 
 const fontGrades = ['5', '5+', '6A', '6A+', '6B', '6B+', '6C', '6C+', '7A', '7A+', '7B', '7B+', '7C', '7C+', '8A', '8A+', '8B']
@@ -28,10 +28,19 @@ function RunningProgress({ data }: { data: ProgressData['running'] }): React.JSX
     <Card title="Weekly mileage"><BarChart data={data.weekly_mileage} label="7-day distance" formatValue={(value) => `${value.toFixed(1)} km`} /></Card>
     <Card title="Monthly mileage"><BarChart data={data.monthly_mileage} label="Calendar-month distance" formatValue={(value) => `${value.toFixed(1)} km`} /><p className="chart-footnote">Calendar months are not mixed with rolling windows.</p></Card>
     <Card title="Rolling volume"><LineChart data={data.rolling_volume} label="7-day mileage" secondaryLabel="28-day weekly average" formatValue={(value) => `${value.toFixed(1)} km`} /></Card>
-    <Card title="Estimated 10K"><LineChart data={data.estimated_10k} label="Estimated time" formatValue={formatRaceTime} /><p className="chart-footnote">Only evidence-backed estimates are shown. A recent verified 10K overrides modelled equivalence.</p></Card>
-    <Card title="LT2 development"><LineChart data={data.lt2} label="LT2 pace" secondaryLabel="LT2 heart rate" formatValue={(value) => value > 250 ? `${formatPace(value)}/km` : `${Math.round(value)} bpm`} /></Card>
-    <Card className="wide-chart" title="Easy running efficiency"><LineChart data={data.easy_efficiency} label="Pace in selected easy-HR band" formatValue={(value) => `${formatPace(value)}/km`} />{data.easy_efficiency_warning && <InlineNotice tone="warning">{data.easy_efficiency_warning}</InlineNotice>}<p className="chart-footnote">Environmental and workout-condition differences can make sessions non-comparable.</p></Card>
+    <EasyRunningEfficiency data={data.easy_efficiency} band={data.easy_efficiency_band} warning={data.easy_efficiency_warning} />
   </div>
+}
+
+function EasyRunningEfficiency({ data, band, warning }: { data: ProgressData['running']['easy_efficiency']; band?: string | null; warning?: string | null }): React.JSX.Element {
+  const chronological = [...data].sort((left, right) => left.date.localeCompare(right.date))
+  const pace = chronological.map((point) => ({ ...point, secondary: null }))
+  return <Card className="wide-chart" title="Easy running efficiency">
+    <div className="metric-grid two"><Metric label="Comparison heart-rate band" value={band ?? 'Not enough data'} /><Metric label="Pace interpretation" value="Lower min/km = faster" /></div>
+    <LineChart data={pace} label="Average pace at comparable easy HR" formatValue={(value) => `${formatPace(value)}/km`} formatYAxisValue={(value) => formatPace(value)} reverseY />
+    {chronological.length ? <div className="performance-table"><div className="performance-row performance-head"><span>Date</span><span>Average pace</span><span>Average heart rate</span><span>Source</span></div>{chronological.map((point) => <div className="performance-row" key={point.date}><span>{formatDate(point.date)}</span><strong>{formatPace(point.value)}/km</strong><span>{point.secondary != null ? `${Math.round(point.secondary)} bpm` : '—'}</span><span>{point.label ?? 'Workout Log'}</span></div>)}</div> : null}
+    {warning && <InlineNotice tone="warning">{warning}</InlineNotice>}
+  </Card>
 }
 
 function ClimbingProgress({ data }: { data: ProgressData['climbing'] }): React.JSX.Element {

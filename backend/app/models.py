@@ -254,6 +254,46 @@ class RunningSessionDetail(Base):
     session: Mapped[CompletedSession] = relationship(back_populates="running")
 
 
+class ImportedRunningActivity(TimestampMixin, Base):
+    """Objective running evidence awaiting an athlete-confirmed post-run review."""
+
+    __tablename__ = "imported_running_activities"
+    __table_args__ = (
+        UniqueConstraint("provider", "external_activity_id", name="uq_imported_run_provider_id"),
+        CheckConstraint("distance_km >= 0", name="ck_imported_run_distance_nonnegative"),
+        CheckConstraint("elapsed_time_seconds > 0", name="ck_imported_run_elapsed_positive"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    athlete_id: Mapped[int] = mapped_column(ForeignKey("athlete_profiles.id"), default=1)
+    provider: Mapped[str] = mapped_column(String(24), default="STRAVA", index=True)
+    external_activity_id: Mapped[str] = mapped_column(String(80))
+    activity_date: Mapped[date] = mapped_column(Date, index=True)
+    start_time: Mapped[time | None] = mapped_column(Time)
+    title: Mapped[str] = mapped_column(String(200))
+    suggested_session_type: Mapped[str] = mapped_column(String(80), default="EASY")
+    distance_km: Mapped[float] = mapped_column(Float)
+    elapsed_time_seconds: Mapped[int] = mapped_column(Integer)
+    moving_time_seconds: Mapped[int | None] = mapped_column(Integer)
+    average_pace_seconds_per_km: Mapped[float | None] = mapped_column(Float)
+    average_hr: Mapped[int | None] = mapped_column(Integer)
+    maximum_hr: Mapped[int | None] = mapped_column(Integer)
+    elevation_m: Mapped[float | None] = mapped_column(Float)
+    cadence: Mapped[float | None] = mapped_column(Float)
+    laps: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    best_efforts: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    detail_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    planned_session_id: Mapped[int | None] = mapped_column(
+        ForeignKey("planned_sessions.id", ondelete="SET NULL"), index=True
+    )
+    completed_session_id: Mapped[int | None] = mapped_column(
+        ForeignKey("completed_sessions.id", ondelete="SET NULL"), unique=True
+    )
+    needs_review: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
+    imported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class ClimbingSessionDetail(Base):
     __tablename__ = "climbing_session_details"
 

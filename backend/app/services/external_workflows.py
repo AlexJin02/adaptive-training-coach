@@ -819,6 +819,27 @@ def _workout_lines(item: models.CompletedSession) -> list[str]:
     return ["- N/A"]
 
 
+def _running_lap_lines(rows: list[dict[str, Any]]) -> list[str]:
+    lines: list[str] = []
+    for position, row in enumerate(rows, 1):
+        if not isinstance(row, dict):
+            lines.append(f"- Lap {position}: {row}")
+            continue
+        index = row.get("lap_index") or row.get("index") or position
+        distance = row.get("distance_km")
+        elapsed = row.get("elapsed_time_seconds")
+        pace = row.get("pace_seconds_per_km")
+        average_hr = row.get("average_hr")
+        cadence = row.get("cadence")
+        lines.append(
+            f"- Lap {index}: {_number(distance)} km; elapsed "
+            f"{_duration(float(elapsed) / 60) if isinstance(elapsed, (int, float)) else 'N/A'}; "
+            f"pace {_pace(float(pace)) if isinstance(pace, (int, float)) else 'N/A'}; "
+            f"avg HR {average_hr or 'N/A'}; cadence {_number(cadence)}"
+        )
+    return lines
+
+
 def weekly_report(db: Session, week_start: date) -> str:
     week_end = week_start + timedelta(days=6)
     profile = core.get_profile(db)
@@ -913,7 +934,7 @@ def weekly_report(db: Session, week_start: date) -> str:
             ]
         )
         if detail and detail.splits:
-            lines.extend(["SPLITS:", *[f"- {row}" for row in detail.splits], ""])
+            lines.extend(["LAPS:", *_running_lap_lines(detail.splits), ""])
         lines.extend(["SUBJECTIVE:", item.subjective_feedback_text or "N/A", ""])
     if not running:
         lines.extend(["N/A", ""])

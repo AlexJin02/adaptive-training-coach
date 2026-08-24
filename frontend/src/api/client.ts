@@ -10,6 +10,7 @@ import type {
   FatigueValue,
   Goal,
   GymSet,
+  ImportedRunningActivity,
   MonthlyPlanContent,
   MonthlyTrainingBlock,
   PlannedSession,
@@ -29,6 +30,24 @@ import type {
 // Production is always served by FastAPI as a one-origin app (including Tailscale phone access).
 // Only Vite development may point directly at the local backend.
 const API_BASE = (import.meta.env.PROD ? '/api/v1' : import.meta.env.VITE_API_BASE_URL ?? '/api/v1').replace(/\/$/, '')
+
+function audioUploadFilename(file: Blob, stem: string): string {
+  const mediaType = (file.type.split(';', 1)[0] ?? '').toLowerCase()
+  const extensions: Record<string, string> = {
+    'audio/mp4': 'm4a',
+    'audio/m4a': 'm4a',
+    'audio/x-m4a': 'm4a',
+    'audio/mpeg': 'mp3',
+    'audio/mp3': 'mp3',
+    'audio/ogg': 'ogg',
+    'audio/wav': 'wav',
+    'audio/x-wav': 'wav',
+    'audio/flac': 'flac',
+    'audio/webm': 'webm',
+  }
+  const extension = extensions[mediaType] ?? 'webm'
+  return `${stem}.${extension}`
+}
 
 export class ApiError extends Error {
   readonly status: number
@@ -124,6 +143,9 @@ export const api = {
   deletePlannedSession: (id: string | number) => request<{ deleted: boolean; id: number }>(`/planned-sessions/${id}`, { method: 'DELETE' }),
   skipPlannedSession: (id: string | number) => request<{ session: PlannedSession; adaptations: AdaptationProposal[] }>(`/planned-sessions/${id}/skip`, { method: 'POST', body: '{}' }),
   completedSessions: () => request<ApiList<CompletedSession>>('/completed-sessions'),
+  stravaRunInbox: () => request<ApiList<ImportedRunningActivity>>('/integrations/strava/runs/inbox'),
+  syncStravaRuns: () => request<ApiList<ImportedRunningActivity> & { imported: number; restored: number; enriched: number }>('/integrations/strava/sync', { method: 'POST', body: '{}' }),
+  completeStravaRun: (id: string | number, body: { session_type: string; title?: string; rpe: number; subjective_feedback_text?: string | null; subjective_feedback_source?: 'VOICE' | 'TEXT' | 'NONE' }) => request<CompletedSession>(`/integrations/strava/runs/${id}/complete`, { method: 'POST', body: json(body) }),
   createCompletedSession: (body: Record<string, unknown>) => request<Record<string, unknown>>('/completed-sessions', { method: 'POST', body: json(body) }),
   deleteCompletedSession: (id: string | number) => request<{ deleted: boolean; id: number }>(`/completed-sessions/${id}`, { method: 'DELETE' }),
   fatigue: () => request<ApiList<FatigueValue>>('/load-readiness/fatigue'),
@@ -151,19 +173,19 @@ export const api = {
   processNote: (body: Record<string, unknown>) => request<Partial<TrainingNote>>('/ai/notes/process', { method: 'POST', body: json(body) }),
   transcribeNote: (file: Blob, retain = false) => {
     const data = new FormData()
-    data.append('audio', file, 'training-note.webm')
+    data.append('audio', file, audioUploadFilename(file, 'training-note'))
     data.append('retain_raw', String(retain))
     return request<{ transcript: string }>('/ai/notes/transcribe', { method: 'POST', body: data })
   },
   transcribeRunningFeedback: (file: Blob) => {
     const data = new FormData()
-    data.append('audio', file, 'running-feedback.webm')
+    data.append('audio', file, audioUploadFilename(file, 'running-feedback'))
     data.append('retain_raw', 'false')
     return request<{ transcript: string }>('/ai/running-feedback/transcribe', { method: 'POST', body: data })
   },
   transcribeWorkoutInput: (file: Blob) => {
     const data = new FormData()
-    data.append('audio', file, 'workout-input.webm')
+    data.append('audio', file, audioUploadFilename(file, 'workout-input'))
     return request<{ transcript: string }>('/ai/workouts/transcribe', { method: 'POST', body: data })
   },
   extractWorkoutText: (text: string) => request<WorkoutExtraction>('/ai/workouts/extract-text', { method: 'POST', body: json({ text }) }),

@@ -38,6 +38,7 @@ from app.services import (
     reporting,
     serializers,
     settings_service,
+    strava,
     uploads,
 )
 from app.session_types import normalise_session_type
@@ -245,6 +246,24 @@ class CompletedSessionInput(InputModel):
             self.result_time_seconds = values[0] * 60 + values[1]
         elif len(values) == 3 and values[0] >= 0 and 0 <= values[1] < 60 and 0 <= values[2] < 60:
             self.result_time_seconds = values[0] * 3600 + values[1] * 60 + values[2]
+        return self
+
+
+class StravaRunReviewInput(InputModel):
+    session_type: Literal["EASY", "LONG_RUN", "QUALITY", "RACE"]
+    title: str | None = Field(None, max_length=200)
+    rpe: float = Field(ge=1, le=10)
+    subjective_feedback_text: str | None = Field(None, max_length=5000)
+    subjective_feedback_source: Literal["VOICE", "TEXT", "NONE"] = "NONE"
+
+    @model_validator(mode="after")
+    def validate_feedback(self) -> StravaRunReviewInput:
+        text = (self.subjective_feedback_text or "").strip()
+        self.subjective_feedback_text = text or None
+        if not text:
+            self.subjective_feedback_source = "NONE"
+        elif self.subjective_feedback_source == "NONE":
+            self.subjective_feedback_source = "TEXT"
         return self
 
 
@@ -482,6 +501,10 @@ def capabilities() -> dict[str, Any]:
         "planner_model": settings.openai_planner_model if configured else None,
         "vision_model": settings.openai_vision_model if configured else None,
         "transcription_model": settings.openai_transcribe_model if configured else None,
+        "strava_sync_configured": strava.is_configured(),
+        "strava_sync_reason": None
+        if strava.is_configured()
+        else "Configure Strava credentials in the backend .env to enable sync.",
         "reason": None
         if configured
         else "OPENAI_API_KEY is not configured; core features still work.",
@@ -580,6 +603,42 @@ def skip_planned_session(session_id: int, db: DatabaseSession = Depends(get_db))
 def completed_sessions(db: DatabaseSession = Depends(get_db)) -> dict[str, Any]:
     items = core.list_completed_sessions(db)
     return {"items": [serializers.completed_session(item) for item in items], "total": len(items)}
+
+
+@router.get("/integrations/strava/runs/inbox")
+def strava_run_inbox(db: DatabaseSession = Depends(get_db)) -> dict[str, Any]:
+    items = strava.inbox(db)
+    return {"items": items, "total": len(items)}
+
+
+@router.post("/integrations/strava/sync")
+def sync_strava_runs(db: DatabaseSession = Depends(get_db)) -> dict[str, Any]:
+    try:
+        result = strava.sync_runs(db)
+    except strava.StravaUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    items = strava.inbox(db)
+    return {
+        "imported": len(result.imported),
+        "restored": len(result.restored),
+        "enriched": len(result.enriched),
+        "items": items,
+        "total": len(items),
+    }
+
+
+@router.post("/integrations/strava/runs/{imported_id}/complete")
+def complete_strava_run_review(
+    imported_id: int,
+    payload: StravaRunReviewInput,
+    db: DatabaseSession = Depends(get_db),
+) -> dict[str, Any]:
+    try:
+        return strava.complete_review(db, imported_id, payload.model_dump())
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.post("/completed-sessions", status_code=status.HTTP_201_CREATED)
@@ -797,18 +856,11 @@ def today_dashboard(
     date_value: date | None = Query(None, alias="date"), db: DatabaseSession = Depends(get_db)
 ) -> dict[str, Any]:
     day = date_value or date.today()
-    profile, goal, adaptations = application.today_context(db)
-    running, climbing, warnings = _readiness_payloads(db)
+    imported_runs = [item for item in strava.inbox(db) if item["date"] == day.isoformat()]
     return {
         "date": day.isoformat(),
-        "goal": serializers.goal(goal) if goal else None,
-        "running_phase": profile.running_phase.value,
-        "climbing_phase": profile.climbing_phase.value,
-        "running_readiness": running,
-        "climbing_readiness": climbing,
         "sessions": core.calendar_entries(db, day, day),
-        "fatigue_warnings": warnings,
-        "pending_adaptations": [serializers.adaptation(item, title) for item, title in adaptations],
+        "imported_runs": imported_runs,
     }
 
 

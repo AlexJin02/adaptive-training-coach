@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     openai_planner_model: str = "gpt-5-mini"
     openai_vision_model: str = "gpt-5-mini"
     openai_transcribe_model: str = "gpt-4o-mini-transcribe"
+    strava_access_token: str | None = None
+    strava_client_id: str | None = None
+    strava_client_secret: str | None = None
+    strava_refresh_token: str | None = None
     retain_raw_screenshots: bool = False
     retain_raw_audio: bool = False
     load_demo_data: bool = False

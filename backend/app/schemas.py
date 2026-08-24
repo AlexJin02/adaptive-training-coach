@@ -485,17 +485,6 @@ class CalendarDayOut(APIModel):
     completed: list[CompletedSessionOut]
 
 
-class TodayOut(APIModel):
-    date: date
-    readiness: FatigueReadinessOut
-    planned_sessions: list[PlannedSessionOut]
-    recent_fatigue_warnings: list[str]
-    primary_goal: GoalOut | None
-    running_phase: RunningPhase
-    climbing_phase: ClimbingPhase
-    pending_adaptations: list[AdaptationProposalOut]
-
-
 class ProgressOut(APIModel):
     from_date: date
     to_date: date

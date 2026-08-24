@@ -54,10 +54,16 @@ def skip_planned_session(
     return item, core.mark_planned_session_skipped(db, item)
 
 
-def record_completed_session(db: Session, values: dict[str, Any]) -> models.CompletedSession:
+def record_completed_session(
+    db: Session, values: dict[str, Any], *, commit: bool = True
+) -> models.CompletedSession:
     # A log is factual evidence only. Legacy derived data remains readable but new records no
     # longer trigger load/readiness calculations, AI analysis, or autonomous plan changes.
-    return core.create_completed_session(db, values)
+    return core.create_completed_session(db, values, commit=commit)
+
+
+def get_completed_session(db: Session, session_id: int) -> models.CompletedSession:
+    return core.get_completed_session(db, session_id)
 
 
 def cancel_planned_session(db: Session, session_id: int) -> models.PlannedSession:

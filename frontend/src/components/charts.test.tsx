@@ -40,6 +40,14 @@ describe('auditable charts', () => {
     expect(screen.getByText('7A')).toBeInTheDocument()
   })
 
+  it('can reverse the vertical axis so lower pace values appear higher', () => {
+    const { container } = render(<LineChart label="Easy pace" data={[{ date: '2026-08-01', value: 330 }, { date: '2026-08-08', value: 300 }]} reverseY />)
+    const points = [...container.querySelectorAll('.chart-point circle:not(.chart-hit-area)')]
+    const slowerY = Number(points[0]?.getAttribute('cy'))
+    const fasterY = Number(points[1]?.getAttribute('cy'))
+    expect(fasterY).toBeLessThan(slowerY)
+  })
+
   it('exposes formatted values on hover and keyboard focus targets', () => {
     const { container } = render(<><LineChart label="Mileage" data={[{ date: '2026-08-01', value: 12.5 }]} formatValue={(value) => `${value} km`} /><BarChart label="Sessions" data={[{ date: 'EASY', value: 3 }]} formatValue={(value) => `${value} runs`} /></>)
     const hoverValues = [...container.querySelectorAll('.chart-hover-value')].map((element) => element.textContent)

@@ -15,7 +15,6 @@ from app.enums import (
     AdaptationDecision,
     AdaptationSource,
     ClimbingPhase,
-    Confidence,
     EstimateType,
     GoalType,
     PlanStatus,
@@ -245,7 +244,9 @@ def _parse_pace_seconds(value: Any) -> float | None:
         return None
 
 
-def create_completed_session(db: Session, values: dict[str, Any]) -> models.CompletedSession:
+def create_completed_session(
+    db: Session, values: dict[str, Any], *, commit: bool = True
+) -> models.CompletedSession:
     sport = Sport(values["workout_kind"])
     duration = float(values["duration_minutes"])
     rpe = values.get("rpe")
@@ -345,7 +346,10 @@ def create_completed_session(db: Session, values: dict[str, Any]) -> models.Comp
         planned = db.get(models.PlannedSession, planned_id)
         if planned:
             planned.status = PlanStatus.COMPLETED
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     return get_completed_session(db, item.id)
 
 
@@ -381,30 +385,6 @@ def list_completed_sessions(db: Session) -> list[models.CompletedSession]:
         models.CompletedSession.session_date.desc(), models.CompletedSession.id.desc()
     )
     return list(db.scalars(query))
-
-
-def _rebuild_automatic_running_estimates(db: Session) -> None:
-    """Recreate derived estimates from active evidence while preserving manual entries."""
-
-    db.query(models.RunningFitnessEstimate).filter(
-        models.RunningFitnessEstimate.evidence.like("Completed session %")
-    ).delete(synchronize_session=False)
-    db.query(models.ThresholdEstimate).filter(
-        (models.ThresholdEstimate.source.like("Completed % session (session %"))
-        | models.ThresholdEstimate.source.like("Range from % recent easy/steady runs at RPE <= 4")
-    ).delete(synchronize_session=False)
-    db.commit()
-    active_running = list(
-        db.scalars(
-            select(models.CompletedSession)
-            .options(selectinload(models.CompletedSession.running))
-            .where(models.CompletedSession.sport == Sport.RUNNING)
-            .order_by(models.CompletedSession.session_date, models.CompletedSession.id)
-        )
-    )
-    for session in active_running:
-        update_running_fitness_estimate(db, session)
-        update_threshold_estimates(db, session)
 
 
 def delete_completed_session(db: Session, session_id: int) -> int:
@@ -623,122 +603,6 @@ def persist_load_readiness_snapshot(
     db.refresh(fatigue_snapshot)
     db.refresh(readiness_snapshot)
     return fatigue_snapshot, readiness_snapshot
-
-
-def update_running_fitness_estimate(
-    db: Session, session: models.CompletedSession
-) -> models.RunningFitnessEstimate | None:
-    if session.sport != Sport.RUNNING or session.running is None:
-        return None
-    if session.workout_type.lower() not in {"race", "time trial"}:
-        return None
-    distance_km = session.running.distance_km
-    if not distance_km or distance_km < 3 or distance_km > 50:
-        return None
-    source_seconds = session.duration_minutes * 60.0
-    is_actual_10k = 9.95 <= distance_km <= 10.05
-    estimated_seconds = (
-        source_seconds if is_actual_10k else source_seconds * (10.0 / distance_km) ** 1.06
-    )
-    item = models.RunningFitnessEstimate(
-        athlete_id=1,
-        estimated_10k_seconds=estimated_seconds,
-        confidence=Confidence.HIGH,
-        source_event=f"{distance_km:g} km {session.workout_type}",
-        source_date=session.session_date,
-        formula=("ACTUAL_10K" if is_actual_10k else "Riegel: T2 = T1 × (D2 / D1)^1.06"),
-        evidence=f"Completed session {session.id}: {source_seconds:.0f} seconds over {distance_km:g} km",
-        is_demo=session.is_demo,
-    )
-    db.add(item)
-    db.commit()
-    db.refresh(item)
-    return item
-
-
-def update_threshold_estimates(
-    db: Session, session: models.CompletedSession
-) -> list[models.ThresholdEstimate]:
-    if session.sport != Sport.RUNNING or session.running is None:
-        return []
-    created: list[models.ThresholdEstimate] = []
-    pace = session.running.average_pace_seconds_per_km
-    hr = session.running.average_hr
-    if session.workout_type.lower() in {"threshold", "tempo", "cruise intervals"} and (
-        pace is not None or hr is not None
-    ):
-        created.append(
-            models.ThresholdEstimate(
-                athlete_id=1,
-                estimate_type=EstimateType.LT2,
-                pace_low_seconds_per_km=pace,
-                pace_high_seconds_per_km=pace,
-                hr_low=hr,
-                hr_high=hr,
-                confidence=Confidence.MODERATE,
-                source=f"Completed {session.workout_type} session (session {session.id})",
-                measured_at=session.session_date,
-                is_demo=session.is_demo,
-            )
-        )
-
-    reference_date = (
-        db.scalar(
-            select(func.max(models.CompletedSession.session_date)).where(
-                models.CompletedSession.sport == Sport.RUNNING,
-            )
-        )
-        or session.session_date
-    )
-    window_start = reference_date - timedelta(days=27)
-    easy_rows = list(
-        db.scalars(
-            select(models.CompletedSession)
-            .options(selectinload(models.CompletedSession.running))
-            .where(
-                models.CompletedSession.sport == Sport.RUNNING,
-                models.CompletedSession.workout_type.in_(["Easy", "Recovery", "Steady"]),
-                models.CompletedSession.session_date.between(window_start, reference_date),
-                models.CompletedSession.rpe <= 4,
-            )
-        )
-    )
-    comparable = [
-        row
-        for row in easy_rows
-        if row.running
-        and row.running.average_pace_seconds_per_km is not None
-        and row.running.average_hr is not None
-    ]
-    existing_lt1 = db.scalar(
-        select(models.ThresholdEstimate).where(
-            models.ThresholdEstimate.estimate_type == EstimateType.LT1,
-            models.ThresholdEstimate.measured_at == reference_date,
-        )
-    )
-    if len(comparable) >= 3 and existing_lt1 is None:
-        paces = [row.running.average_pace_seconds_per_km for row in comparable if row.running]
-        hrs = [row.running.average_hr for row in comparable if row.running]
-        created.append(
-            models.ThresholdEstimate(
-                athlete_id=1,
-                estimate_type=EstimateType.LT1,
-                pace_low_seconds_per_km=min(paces),
-                pace_high_seconds_per_km=max(paces),
-                hr_low=min(hrs),
-                hr_high=max(hrs),
-                confidence=Confidence.MODERATE,
-                source=f"Range from {len(comparable)} recent easy/steady runs at RPE <= 4",
-                measured_at=reference_date,
-                is_demo=all(row.is_demo for row in comparable),
-            )
-        )
-    if created:
-        db.add_all(created)
-        db.commit()
-        for item in created:
-            db.refresh(item)
-    return created
 
 
 def create_recovery_checkin(db: Session, values: dict[str, Any]) -> models.RecoveryCheckin:

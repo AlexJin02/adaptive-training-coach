@@ -134,9 +134,9 @@ components, subjective delta, calculation time, and algorithm version.
 
 ### `running_fitness_estimates`
 
-Append-only 10K estimate rows containing seconds, confidence, source event/date, formula,
-evidence, demo flag, and timestamps. Race/time-trial evidence creates these rows; a recent actual
-10K takes display precedence over Riegel estimates.
+Legacy/manual append-only 10K estimate rows containing seconds, confidence, source event/date,
+formula, evidence, demo flag, and timestamps. New workout saves no longer generate these rows,
+and Progress does not render them. They remain readable for backup compatibility.
 
 ### `threshold_estimates`
 
@@ -144,7 +144,8 @@ Append-only LT1/LT2 rows containing pace/HR ranges, confidence, source, measured
 and timestamps.
 
 Calendar/rolling mileage and easy-efficiency series are derived from completed running sessions;
-they are not competing mutable totals.
+they are not competing mutable totals. Progress deliberately omits race-prediction and LT2-proxy
+modules because the available evidence is not sufficient to make those views useful.
 
 ### Climbing evidence
 
@@ -193,6 +194,20 @@ Optional source-note link, category, principle text, active flag, athlete-approv
 timestamps. The API creates explicitly approved principles; note processing cannot create one.
 
 ## Imports and settings
+
+### `imported_running_activities`
+
+Strava running activities are deduplicated by provider and external activity ID, normalised into
+date/time, distance, elapsed/moving time, pace, heart-rate, elevation, cadence, JSON lap rows, and
+JSON Best Efforts. `detail_synced_at` prevents repeated detail calls; each Sync backfills at most
+12 recent missing detailed activities to stay conservative with provider rate limits. The rows
+are retained as objective evidence awaiting athlete review. A same-date uncompleted running plan
+may be linked as the suggested Calendar match. `needs_review` remains true until the athlete
+confirms run type and RPE; optional edited voice/text feedback is saved only on the resulting
+completed session. Confirmation links the completed session and marks the plan completed. Raw
+provider responses and provider credentials are not stored in this table.
+Strava run cadence is normalised from the API's per-foot value to total steps per minute for both
+activity averages and lap rows; manual and screenshot cadence already use total steps per minute.
 
 ### `monthly_training_blocks` and `imported_plans`
 
@@ -246,7 +261,7 @@ flagged records; relational child rows cascade from their owner.
 
 ```json
 {
-  "schema_version": "1.0",
+  "schema_version": "1.3",
   "exported_at": "2026-08-23T...+00:00",
   "data": {
     "athlete_profiles": [],
@@ -261,7 +276,10 @@ local paths are set to `null` and retention flags to false; environment secrets 
 files are not included. The format currently has no application-version or athlete-timezone
 top-level field.
 
-Restore accepts schema version `1.0`, prepares known table rows and known columns/types before
+Restore accepts schema version `1.3`, plus legacy `1.0`, `1.1`, and `1.2` backups. The Strava Inbox
+table is deterministically added for `1.0`; Best Efforts/detail-sync fields are added to older Inbox
+rows with empty/null defaults, and legacy Strava cadence is converted to total steps per minute.
+It prepares known table rows and known columns/types before
 replacement, deletes in reverse dependency order, inserts in forward order, and commits once.
 Database/insert failure rolls the transaction back to the previous state. The Settings UI
 requires typing `RESTORE`, while the API itself accepts the uploaded backup directly. V1 is full

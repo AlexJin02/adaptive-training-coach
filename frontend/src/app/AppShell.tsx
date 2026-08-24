@@ -6,7 +6,7 @@ import { useCapabilities } from './CapabilityProvider'
 import { useTheme } from './ThemeProvider'
 
 const navigation: { to: string; label: string; short: string; icon: IconName }[] = [
-  { to: '/quick-log', label: 'Quick Log', short: 'Quick Log', icon: 'plus' },
+  { to: '/today', label: "Today's Training", short: 'Today', icon: 'today' },
   { to: '/calendar', label: 'Calendar', short: 'Calendar', icon: 'calendar' },
   { to: '/progress', label: 'Progress', short: 'Progress', icon: 'progress' },
   { to: '/workouts', label: 'Workout Log', short: 'Log', icon: 'workouts' },
@@ -24,7 +24,7 @@ export function AppShell(): React.JSX.Element {
   const [menuOpen, setMenuOpen] = useState(false)
   const { theme, toggleTheme } = useTheme()
   const { capabilities, connected } = useCapabilities()
-  const mobilePrimary = navigation.filter((item) => ['/quick-log', '/calendar', '/workouts'].includes(item.to))
+  const mobilePrimary = navigation.filter((item) => ['/today', '/calendar', '/workouts'].includes(item.to))
 
   return <div className="app-shell">
     <aside className={`sidebar ${menuOpen ? 'sidebar-open' : ''}`}>

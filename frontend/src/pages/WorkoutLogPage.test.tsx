@@ -21,6 +21,98 @@ describe('workout import degradation', () => {
     expect(screen.getByLabelText(/RPE \(1–10\)/)).toHaveValue(3)
   })
 
+  it('reviews a matched Strava run with laps, required RPE and editable feedback', async () => {
+    const imported = {
+      id: 31,
+      provider: 'STRAVA',
+      external_activity_id: '987654',
+      date: '2026-08-24',
+      start_time: '07:15',
+      title: 'Threshold 4 x 8',
+      suggested_session_type: 'QUALITY',
+      distance_km: 10,
+      elapsed_time_seconds: 3100,
+      moving_time_seconds: 3000,
+      average_pace_seconds_per_km: 300,
+      average_hr: 148,
+      max_hr: 172,
+      elevation_m: 82,
+      cadence: 174,
+      needs_review: true,
+      imported_at: '2026-08-24T08:00:00Z',
+      laps: [{ lap_index: 1, distance_km: 1, elapsed_time_seconds: 305, pace_seconds_per_km: 300, average_hr: 145, cadence: 173 }],
+      planned_session: { id: 8, date: '2026-08-24', workout_kind: 'RUNNING', session_type: 'QUALITY', title: 'Threshold 4 x 8', status: 'PLANNED' },
+    }
+    const mock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      const body = url.includes('/capabilities') ? { ...capabilitiesOff, strava_sync_configured: true }
+        : url.includes('/integrations/strava/runs/31/complete') && init?.method === 'POST' ? { id: 50 }
+          : url.includes('/integrations/strava/runs/inbox') ? { items: [imported], total: 1 }
+            : { items: [] }
+      return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    })
+    vi.stubGlobal('fetch', mock)
+    const user = userEvent.setup()
+    render(<MemoryRouter><CapabilityProvider><WorkoutLogPage /></CapabilityProvider></MemoryRouter>)
+
+    await user.click(await screen.findByRole('button', { name: 'Complete Review' }))
+    const review = within(screen.getByRole('dialog', { name: 'Post-Run Review' }))
+    expect(review.getByText(/Matched planned session/)).toBeInTheDocument()
+    expect(review.getByText('Strava laps')).toBeInTheDocument()
+    expect(review.getByText('5:05')).toBeInTheDocument()
+    expect(review.getByText('174 spm')).toBeInTheDocument()
+    expect(review.getByText('173 spm')).toBeInTheDocument()
+    expect(review.getByLabelText('Run type')).toHaveValue('QUALITY')
+    await user.click(review.getByRole('button', { name: '7' }))
+    await user.type(review.getByPlaceholderText(/前半程很輕鬆/), '心肺受控，最後兩圈腿有點沉。')
+    await user.click(review.getByRole('button', { name: 'Save Completed Workout' }))
+
+    await waitFor(() => expect(mock.mock.calls.some(([input]) => String(input).includes('/integrations/strava/runs/31/complete'))).toBe(true))
+    const post = mock.mock.calls.find(([input]) => String(input).includes('/integrations/strava/runs/31/complete'))
+    expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({ session_type: 'QUALITY', title: 'Threshold 4 x 8', rpe: 7, subjective_feedback_text: '心肺受控，最後兩圈腿有點沉。', subjective_feedback_source: 'TEXT' })
+  })
+
+  it('reports a deleted Workout Log run returned by Strava sync', async () => {
+    const restored = {
+      id: 31,
+      provider: 'STRAVA',
+      external_activity_id: '987654',
+      date: '2026-08-24',
+      start_time: '07:15',
+      title: 'Morning Run',
+      suggested_session_type: 'EASY',
+      distance_km: 10,
+      elapsed_time_seconds: 3100,
+      moving_time_seconds: 3000,
+      average_pace_seconds_per_km: 300,
+      needs_review: true,
+      imported_at: '2026-08-24T08:00:00Z',
+      laps: [],
+      planned_session: null,
+    }
+    const mock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      const body = url.includes('/capabilities')
+        ? { ...capabilitiesOff, strava_sync_configured: true }
+        : url.includes('/integrations/strava/sync') && init?.method === 'POST'
+          ? { imported: 0, restored: 1, items: [restored], total: 1 }
+          : url.includes('/integrations/strava/runs/inbox')
+            ? { items: [], total: 0 }
+            : { items: [] }
+      return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    })
+    vi.stubGlobal('fetch', mock)
+    const user = userEvent.setup()
+    render(<MemoryRouter><CapabilityProvider><WorkoutLogPage /></CapabilityProvider></MemoryRouter>)
+
+    const sync = await screen.findByRole('button', { name: 'Sync Strava' })
+    await waitFor(() => expect(sync).toBeEnabled())
+    await user.click(sync)
+
+    expect(await screen.findByText(/1 missing Workout Log run returned for review/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Complete Review' })).toBeInTheDocument()
+  })
+
   it('maps bouldering imports explicitly and preserves reviewed RPE and split detail', async () => {
     const extraction: WorkoutExtraction = {
       workout_kind: extracted(null),
@@ -99,24 +191,57 @@ describe('workout import degradation', () => {
     const session = {
       id: 12, date: '2026-08-23', workout_kind: 'CROSSFIT_CONDITIONING', session_type: 'Mixed detail', duration_minutes: 45, rpe: 8, srpe_load: 360,
       workout_name: 'Engine test', rounds: 4, result_time_seconds: 754,
-      splits: [{ distance_km: 1, time: '4:15' }], interval_blocks: [{ phase: 'Main', detail: '4 × 1 km' }],
-      climbing_attempts: [{ problem: 'Blue 7', grade: 'V7', attempts: 3 }], strength_sets: [{ exercise: 'deadlift', reps: 5, load_kg: 100 }],
+      splits: [{ lap_index: 1, distance_km: 1, elapsed_time_seconds: 330, pace_seconds_per_km: 330, average_hr: 165, cadence: 180 }], interval_blocks: [{ phase: 'Main', detail: '4 × 1 km' }],
+      climbing_attempts: [{ problem: 'Blue 7', grade: 'V7', attempts: 3, sent: true, send_count: 1, style_tags: ['crimp', 'technical'] }], strength_sets: [{ exercise: 'deadlift', reps: 5, load_kg: 100 }],
       ai_analysis: { execution_summary: 'x'.repeat(250), confidence: 'LOW' },
     }
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ items: [session] }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
     const user = userEvent.setup()
-    render(<MemoryRouter><WorkoutLogPage /></MemoryRouter>)
+    render(<MemoryRouter><CapabilityProvider><WorkoutLogPage /></CapabilityProvider></MemoryRouter>)
 
     await user.click(await screen.findByRole('button', { name: 'View Mixed detail' }))
     const detail = within(screen.getByRole('dialog', { name: 'Mixed Detail' }))
     expect(detail.getByText('Engine test')).toBeInTheDocument()
     expect(detail.getByText('12:34')).toBeInTheDocument()
-    expect(detail.getByText('Splits')).toBeInTheDocument()
+    expect(detail.getByText('Lap details')).toBeInTheDocument()
+    expect(detail.getByText('1.00 km')).toBeInTheDocument()
+    expect(detail.getByText('5:30 /km')).toBeInTheDocument()
+    expect(detail.getByText('165 bpm')).toBeInTheDocument()
+    expect(detail.getByText('180 spm')).toBeInTheDocument()
+    expect(detail.queryByText('Notes')).not.toBeInTheDocument()
+    expect(detail.queryByText(/lap index:/i)).not.toBeInTheDocument()
     expect(detail.getByText('Intervals')).toBeInTheDocument()
     expect(detail.getByText('Climbing attempts')).toBeInTheDocument()
+    expect(detail.getByText('Blue 7')).toBeInTheDocument()
+    expect(detail.getByText('V7')).toBeInTheDocument()
+    expect(detail.getByText('Sent')).toBeInTheDocument()
+    expect(detail.getByText('crimp, technical')).toBeInTheDocument()
+    expect(detail.queryByText(/problem: Blue 7/i)).not.toBeInTheDocument()
     expect(detail.getByText('Strength sets')).toBeInTheDocument()
     expect(detail.getByText(/exercise: deadlift/)).toBeInTheDocument()
     expect(detail.queryByText((content) => content.startsWith('x'))).not.toBeInTheDocument()
+  })
+
+  it('opens a requested result and filters history by date, sport and session type', async () => {
+    const sessions = [
+      { id: 50, date: '2026-08-24', workout_kind: 'RUNNING', session_type: 'QUALITY', title: 'Track Repeats', duration_minutes: 54, rpe: 7 },
+      { id: 51, date: '2026-08-23', workout_kind: 'CLIMBING', session_type: 'BOARD', title: 'TB2 Session', duration_minutes: 90, rpe: 8 },
+    ]
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const body = String(input).includes('/capabilities') ? capabilitiesOff : String(input).includes('/integrations/strava/runs/inbox') ? { items: [], total: 0 } : { items: sessions }
+      return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }))
+    const user = userEvent.setup()
+    render(<MemoryRouter initialEntries={['/workouts?session_id=50']}><CapabilityProvider><WorkoutLogPage /></CapabilityProvider></MemoryRouter>)
+
+    expect(await screen.findByRole('dialog', { name: 'Track Repeats' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Close' }))
+    await user.selectOptions(screen.getByLabelText('Sport'), 'CLIMBING')
+    expect(screen.getByText('TB2 Session')).toBeInTheDocument()
+    expect(screen.queryByText('Track Repeats')).not.toBeInTheDocument()
+    await user.selectOptions(screen.getByLabelText('Session type'), 'BOARD')
+    await user.type(screen.getByLabelText('From'), '2026-08-24')
+    expect(screen.getByText('No matching workouts')).toBeInTheDocument()
   })
 
   it('requires irreversible confirmation before deleting a workout', async () => {
@@ -124,7 +249,7 @@ describe('workout import degradation', () => {
     const mock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => new Response(JSON.stringify(init?.method === 'DELETE' ? { deleted: true, id: 7 } : { items: [session] }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
     vi.stubGlobal('fetch', mock)
     const user = userEvent.setup()
-    render(<MemoryRouter><WorkoutLogPage /></MemoryRouter>)
+    render(<MemoryRouter><CapabilityProvider><WorkoutLogPage /></CapabilityProvider></MemoryRouter>)
 
     await user.click(await screen.findByRole('button', { name: 'View Easy' }))
     await user.click(screen.getByRole('button', { name: 'Delete workout' }))

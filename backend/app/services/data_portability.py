@@ -13,7 +13,8 @@ from sqlalchemy.orm import Session
 
 from app.db import Base
 
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "1.3"
+LEGACY_SCHEMA_VERSIONS = {"1.0", "1.1", "1.2"}
 EXPORTABLE_TABLES = {
     "completed_sessions",
     "planned_sessions",
@@ -80,11 +81,50 @@ def _db_value(column: Any, value: Any) -> Any:
 
 
 def restore_backup(db: Session, payload: dict[str, Any]) -> int:
-    if payload.get("schema_version") != SCHEMA_VERSION:
+    schema_version = payload.get("schema_version")
+    if schema_version != SCHEMA_VERSION and schema_version not in LEGACY_SCHEMA_VERSIONS:
         raise ValueError(f"Unsupported backup schema version: {payload.get('schema_version')}")
     data = payload.get("data")
     if not isinstance(data, dict):
         raise ValueError("Backup data must be an object")
+    if schema_version == "1.0" and "imported_running_activities" not in data:
+        # Version 1.0 predates the Strava Inbox. Treat only this known new table as empty; all
+        # original tables remain mandatory so a partial payload can never wipe local data.
+        data = {**data, "imported_running_activities": []}
+    if schema_version in {"1.0", "1.1"}:
+        imported_rows = data.get("imported_running_activities", [])
+        if isinstance(imported_rows, list):
+            for row in imported_rows:
+                if isinstance(row, dict):
+                    row.setdefault("best_efforts", [])
+                    row.setdefault("detail_synced_at", None)
+    if schema_version in LEGACY_SCHEMA_VERSIONS:
+        imported_rows = data.get("imported_running_activities", [])
+        linked_running: dict[int, tuple[float | None, list[Any]]] = {}
+        if isinstance(imported_rows, list):
+            for row in imported_rows:
+                if not isinstance(row, dict) or row.get("provider") != "STRAVA":
+                    continue
+                cadence = row.get("cadence")
+                if isinstance(cadence, (int, float)):
+                    row["cadence"] = cadence * 2
+                laps = row.get("laps")
+                if isinstance(laps, list):
+                    for lap in laps:
+                        if isinstance(lap, dict) and isinstance(lap.get("cadence"), (int, float)):
+                            lap["cadence"] *= 2
+                completed_id = row.get("completed_session_id")
+                if isinstance(completed_id, int):
+                    linked_running[completed_id] = (
+                        row.get("cadence"),
+                        laps if isinstance(laps, list) else [],
+                    )
+        running_rows = data.get("running_session_details", [])
+        if isinstance(running_rows, list):
+            for row in running_rows:
+                if not isinstance(row, dict) or row.get("session_id") not in linked_running:
+                    continue
+                row["cadence"], row["splits"] = linked_running[row["session_id"]]
     required_tables = {table.name for table in Base.metadata.sorted_tables}
     missing_tables = sorted(required_tables - set(data))
     if missing_tables:

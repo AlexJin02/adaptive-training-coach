@@ -8,11 +8,12 @@ This README describes the checked-in runtime. [Product specification](docs/produ
 
 ## What it covers
 
-- Quick Log, weekly Calendar, editable planned sessions, and factual workout history
-- Running state, volume, race estimates, LT1/LT2 evidence, and progression charts
+- Today's Training as the home view, weekly Calendar, editable planned sessions, and a filterable factual workout history
+- Running state, transparent volume trends, and comparable-HR easy-running efficiency
 - Climbing state, angle-aware Tension Board 2 benchmarks, home-gym set history, and route benchmarks
 - Strict running types (`EASY`, `LONG_RUN`, `QUALITY`, `RACE`) and climbing types (`BOULDERING`, `SPORT_CLIMBING`, `BOARD`)
 - Screenshot, natural-language, and voice-assisted workout entry with preview-before-save
+- Optional Strava running sync into a review Inbox with planned-session matching and lap detail
 - Text and voice Training Notes, structured into Running, Climbing, or Strength & Mobility
 - Fixed `TRAINING_WEEKLY_REPORT_V1` and `TRAINING_MONTHLY_REPORT_V1` Markdown exports
 - Deterministic `TRAINING_WEEKLY_PLAN_V1` and `TRAINING_MONTHLY_PLAN_V1` preview/import, with a structured readable monthly-block view
@@ -97,6 +98,8 @@ make clean         # remove generated caches/build output, not athlete data
 | `OPENAI_MODEL` | Text analysis/coaching model | Chosen in backend configuration |
 | `OPENAI_VISION_MODEL` | Screenshot extraction model | Chosen in backend configuration |
 | `OPENAI_TRANSCRIBE_MODEL` | Voice transcription model | Chosen in backend configuration |
+| `STRAVA_ACCESS_TOKEN` | Optional current Strava token | Enables manual Sync Strava from Run Inbox |
+| `STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET`, `STRAVA_REFRESH_TOKEN` | Optional Strava refresh credentials | Backend refreshes access tokens in memory; secrets never reach the browser or backup |
 | `RETAIN_RAW_SCREENSHOTS` | Retain uploaded screenshots locally | `false` |
 | `RETAIN_RAW_AUDIO` | Retain uploaded voice-note audio locally | `false` |
 | `LOAD_DEMO_DATA` | Explicitly enable demo-data loading | `false` |
@@ -135,6 +138,13 @@ Extract -> structured preview -> athlete correction -> confirmation -> save
 Unknown extraction values remain `null`; extracted workout fields retain confidence and source metadata. Screenshot and raw-audio retention is off by default. A failed file request may leave a `media_imports` audit row, but it does not create a completed workout or note and cannot edit the plan.
 
 Voice notes use the browser `MediaRecorder` and send audio only to the configured transcription provider. The transcription prompt is tuned for Chinese, English, and mixed running/climbing terminology. The transcript and organised note are editable before saving.
+
+Strava sync is an optional backend-only import path. The Run Inbox fetches recent running
+activities and available laps, deduplicates them by Strava activity ID, and tries to match an
+uncompleted running plan on the same date. An imported run remains `needs_review` and does not
+change Calendar until the athlete chooses its run type, adds RPE, optionally reviews voice/text
+feedback, and presses **Save Completed Workout**. This release does not add an in-app Strava OAuth
+connection screen; credentials are supplied through `.env`.
 
 Training Notes are personal knowledge, not measured evidence. They do not change calculations or Calendar plans.
 
@@ -193,6 +203,6 @@ Do not report repository creation or push success until the final `gh repo view`
 - V1 uses screenshots and manual input rather than Garmin or Strava OAuth.
 - V1 is a single-athlete, trusted-host application with no user authentication. Both servers bind to loopback, and browser writes require a trusted Origin, but loopback does not isolate other accounts or processes on a shared computer. Do not run it on an untrusted multi-user host.
 - File handlers enforce MIME/signature checks and 10 MiB screenshot / 25 MiB audio or restore limits after multipart parsing. An untrusted local process could still consume temporary-disk space while the web framework spools a request; this is another reason the V1 host must be trusted.
-- LT1, LT2, and 10K estimates depend on available evidence and may intentionally display `Not enough data`.
+- LT1 depends on available evidence and may intentionally display `Not enough data`. Progress deliberately omits race predictions and LT2 proxy charts.
 - Climbing grades are ordinal labels for sorting and chart placement; distances between grades are not treated as linear physiology.
 - Legacy engine tables and endpoints remain for migration and backup compatibility but are not part of normal navigation, session saving, reporting, or plan importing.

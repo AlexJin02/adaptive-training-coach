@@ -18,9 +18,16 @@ describe('application shell', () => {
   it('renders the factual logger and simplified primary destinations', async () => {
     renderApp()
     expect(await screen.findByRole('heading', { name: 'Workout Log' })).toBeInTheDocument()
-    const labels = ['Quick Log', 'Calendar', 'Progress', 'Workout Log', 'Training Reports', 'Training Plan', 'Training Notes', 'Settings']
+    const labels = ["Today's Training", 'Calendar', 'Progress', 'Workout Log', 'Training Reports', 'Training Plan', 'Training Notes', 'Settings']
     for (const label of labels) expect(screen.getAllByRole('link', { name: label }).length).toBeGreaterThan(0)
     expect(screen.queryByRole('link', { name: 'Load & Readiness' })).not.toBeInTheDocument()
+  })
+
+  it("uses Today's Training as the home page and keeps the retired Quick Log URL working", async () => {
+    renderApp('/quick-log')
+    expect(await screen.findByRole('heading', { name: "Today's Training" })).toBeInTheDocument()
+    expect(screen.getByText(/No planned training today/i)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Log workout/i })).not.toBeInTheDocument()
   })
 
   it('navigates to the workout logger without a page reload', async () => {

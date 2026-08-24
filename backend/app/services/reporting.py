@@ -185,32 +185,24 @@ def progress_data(db: Session, range_name: str, today: date | None = None) -> di
             {"date": cursor.isoformat(), "value": round(seven, 2), "label": "7-day total"}
         )
         cursor += timedelta(days=7)
-    estimates = list(
+    strava_rows = list(
         db.scalars(
-            select(models.RunningFitnessEstimate)
+            select(models.ImportedRunningActivity)
             .where(
-                models.RunningFitnessEstimate.source_date.between(start, end)
-                | (
-                    models.RunningFitnessEstimate.source_date.is_(None)
-                    & (models.RunningFitnessEstimate.created_at >= start)
-                )
+                models.ImportedRunningActivity.provider == "STRAVA",
+                models.ImportedRunningActivity.activity_date.between(start, end),
+                models.ImportedRunningActivity.needs_review.is_(False),
+                models.ImportedRunningActivity.completed_session_id.is_not(None),
             )
-            .order_by(
-                models.RunningFitnessEstimate.source_date,
-                models.RunningFitnessEstimate.created_at,
-            )
+            .order_by(models.ImportedRunningActivity.activity_date)
         )
     )
-    lt2_rows = list(
-        db.scalars(
-            select(models.ThresholdEstimate)
-            .where(
-                models.ThresholdEstimate.estimate_type == "LT2",
-                models.ThresholdEstimate.measured_at.between(start, end),
-            )
-            .order_by(models.ThresholdEstimate.measured_at)
-        )
-    )
+    completed_by_id = {item.id: item for item in running_sessions}
+    strava_by_completed_id = {
+        item.completed_session_id: item
+        for item in strava_rows
+        if item.completed_session_id in completed_by_id
+    }
     tb2_rows = list(
         db.scalars(
             select(models.TB2Benchmark)
@@ -246,13 +238,15 @@ def progress_data(db: Session, range_name: str, today: date | None = None) -> di
                 "date": item.session_date.isoformat(),
                 "value": item.running.average_pace_seconds_per_km,
                 "secondary": item.running.average_hr,
-                "label": f"Easy HR band {median_hr - 3}–{median_hr + 3} bpm",
+                "label": ("Strava" if item.id in strava_by_completed_id else "Workout Log"),
+                "heart_rate_band": f"{median_hr - 3}–{median_hr + 3} bpm",
             }
             for item in comparable_easy
             if item.running and abs(item.running.average_hr - median_hr) <= 3
         ]
     else:
         efficiency = []
+        median_hr = None
     return {
         "running": {
             "monthly_mileage": monthly_series,
@@ -273,32 +267,17 @@ def progress_data(db: Session, range_name: str, today: date | None = None) -> di
                     ).items()
                 )
             ],
-            "estimated_10k": [
-                {
-                    "date": (item.source_date or item.created_at.date()).isoformat(),
-                    "value": item.estimated_10k_seconds,
-                    "confidence": item.confidence.value,
-                    "label": item.source_event,
-                }
-                for item in estimates
-                if item.estimated_10k_seconds is not None
-            ],
-            "lt2": [
-                {
-                    "date": item.measured_at.isoformat(),
-                    "value": item.pace_low_seconds_per_km,
-                    "secondary": item.hr_low,
-                    "confidence": item.confidence.value,
-                    "label": item.source,
-                }
-                for item in lt2_rows
-                if item.pace_low_seconds_per_km is not None
-            ],
             "easy_efficiency": efficiency if len(efficiency) >= 3 else [],
+            "easy_efficiency_band": (
+                f"{median_hr - 3}–{median_hr + 3} bpm"
+                if median_hr is not None and len(efficiency) >= 3
+                else None
+            ),
             "easy_efficiency_warning": (
-                "Pace is compared only within a narrow easy-HR band; weather, terrain and "
-                "workout conditions may still differ."
-                if len(efficiency) >= 3
+                f"Only easy runs with average heart rate between {median_hr - 3} and "
+                f"{median_hr + 3} bpm are compared. Lower pace time means faster running. "
+                "Weather, terrain and workout conditions may still differ."
+                if median_hr is not None and len(efficiency) >= 3
                 else "Not enough comparable easy-HR data."
             ),
         },

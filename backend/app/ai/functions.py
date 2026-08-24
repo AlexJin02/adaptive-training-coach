@@ -4,6 +4,7 @@ import base64
 import json
 import re
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -17,6 +18,74 @@ from app.session_types import normalise_session_type
 
 class AIUnavailableError(RuntimeError):
     pass
+
+
+_AUDIO_FILE_TYPES: dict[str, tuple[str, set[str]]] = {
+    "audio/webm": (".webm", {".webm"}),
+    "audio/mp4": (".m4a", {".m4a", ".mp4"}),
+    "audio/m4a": (".m4a", {".m4a", ".mp4"}),
+    "audio/x-m4a": (".m4a", {".m4a", ".mp4"}),
+    "audio/mpeg": (".mp3", {".mp3", ".mpeg", ".mpga"}),
+    "audio/mp3": (".mp3", {".mp3"}),
+    "audio/ogg": (".ogg", {".ogg", ".opus"}),
+    "audio/wav": (".wav", {".wav"}),
+    "audio/x-wav": (".wav", {".wav"}),
+    "audio/wave": (".wav", {".wav"}),
+    "audio/flac": (".flac", {".flac"}),
+    "audio/x-flac": (".flac", {".flac"}),
+}
+
+
+def _normalise_audio_upload(filename: str, media_type: str) -> tuple[str, str]:
+    """Give OpenAI consistent filename and MIME metadata across browser recorders."""
+
+    clean_media_type = media_type.split(";", 1)[0].strip().lower()
+    preferred_suffix, accepted_suffixes = _AUDIO_FILE_TYPES.get(
+        clean_media_type, (".webm", {".webm"})
+    )
+    clean_name = Path(filename).name or f"recording{preferred_suffix}"
+    if Path(clean_name).suffix.lower() not in accepted_suffixes:
+        clean_name = f"{Path(clean_name).stem or 'recording'}{preferred_suffix}"
+    return clean_name, clean_media_type
+
+
+def _transcription_error(response: httpx.Response) -> str:
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = None
+    if isinstance(payload, dict):
+        error = payload.get("error")
+        if isinstance(error, dict) and isinstance(error.get("message"), str):
+            return error["message"]
+    return f"OpenAI returned HTTP {response.status_code}"
+
+
+def _transcribe_audio(audio: bytes, filename: str, media_type: str, prompt: str) -> str:
+    settings = get_settings()
+    key = _require_key(settings)
+    upload_name, upload_media_type = _normalise_audio_upload(filename, media_type)
+    try:
+        response = httpx.post(
+            "https://api.openai.com/v1/audio/transcriptions",
+            headers={"Authorization": f"Bearer {key}"},
+            data={"model": settings.openai_transcribe_model, "prompt": prompt},
+            files={"file": (upload_name, audio, upload_media_type)},
+            timeout=90,
+        )
+        response.raise_for_status()
+        transcript = response.json().get("text")
+    except httpx.HTTPStatusError as exc:
+        raise AIUnavailableError(
+            f"Transcription failed: {_transcription_error(exc.response)}"
+        ) from exc
+    except (httpx.HTTPError, AttributeError, ValueError) as exc:
+        raise AIUnavailableError(
+            "Transcription failed because OpenAI could not be reached."
+        ) from exc
+    if not transcript:
+        raise AIUnavailableError("Transcription returned no text.")
+    return str(transcript)
 
 
 class StrictAIOutput(BaseModel):
@@ -534,27 +603,11 @@ def extract_workout_from_image(image: bytes, media_type: str) -> WorkoutExtracti
 
 
 def transcribe_training_note(audio: bytes, filename: str, media_type: str) -> str:
-    settings = get_settings()
-    key = _require_key(settings)
     prompt = (
         "Chinese and English running/climbing note. Vocabulary: LT1, LT2, threshold, VO2max, "
         "Tension Board, TB2, heel hook, toe hook, limit bouldering, max hangs, power endurance, RPE."
     )
-    try:
-        response = httpx.post(
-            "https://api.openai.com/v1/audio/transcriptions",
-            headers={"Authorization": f"Bearer {key}"},
-            data={"model": settings.openai_transcribe_model, "prompt": prompt},
-            files={"file": (filename, audio, media_type)},
-            timeout=90,
-        )
-        response.raise_for_status()
-        transcript = response.json().get("text")
-    except (httpx.HTTPError, ValueError) as exc:
-        raise AIUnavailableError(f"Transcription failed: {exc}") from exc
-    if not transcript:
-        raise AIUnavailableError("Transcription returned no text.")
-    return str(transcript)
+    return _transcribe_audio(audio, filename, media_type, prompt)
 
 
 def classify_note_text(text: str) -> tuple[NoteCategory, Confidence]:
@@ -720,28 +773,12 @@ def _typed_planner_call(
 
 
 def transcribe_running_feedback(audio: bytes, filename: str, media_type: str) -> str:
-    settings = get_settings()
-    key = _require_key(settings)
     prompt = (
         "Post-run subjective feedback in Chinese, English, or mixed language. Preserve training "
         "terms: easy run, threshold, tempo, interval, VO2, LT1, LT2, RPE, heart rate, pace, "
         "long run, strides. Transcribe faithfully; do not analyse or add advice."
     )
-    try:
-        response = httpx.post(
-            "https://api.openai.com/v1/audio/transcriptions",
-            headers={"Authorization": f"Bearer {key}"},
-            data={"model": settings.openai_transcribe_model, "prompt": prompt},
-            files={"file": (filename, audio, media_type)},
-            timeout=90,
-        )
-        response.raise_for_status()
-        transcript = response.json().get("text")
-    except (httpx.HTTPError, ValueError) as exc:
-        raise AIUnavailableError(f"Transcription failed: {exc}") from exc
-    if not transcript:
-        raise AIUnavailableError("Transcription returned no text.")
-    return str(transcript)
+    return _transcribe_audio(audio, filename, media_type, prompt)
 
 
 def _typed_coaching_call(

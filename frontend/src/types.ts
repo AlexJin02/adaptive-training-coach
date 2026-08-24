@@ -27,6 +27,8 @@ export interface ApiCapabilities {
   planner_model?: string | null
   vision_model?: string | null
   transcription_model?: string | null
+  strava_sync_configured?: boolean
+  strava_sync_reason?: string | null
   reason?: string | null
 }
 
@@ -127,6 +129,40 @@ export interface CompletedSession {
   subjective_feedback_source?: 'VOICE' | 'TEXT' | 'NONE'
   subjective_feedback_created_at?: string | null
   is_demo?: boolean
+}
+
+export interface StravaRunLap {
+  lap_index: number
+  distance_km: number
+  elapsed_time_seconds?: number | null
+  pace_seconds_per_km?: number | null
+  average_hr?: number | null
+  cadence?: number | null
+}
+
+export interface ImportedRunningActivity {
+  id: number
+  provider: 'STRAVA'
+  external_activity_id: string
+  date: string
+  start_time?: string | null
+  title: string
+  suggested_session_type: RunningSessionType
+  distance_km: number
+  elapsed_time_seconds: number
+  moving_time_seconds?: number | null
+  average_pace_seconds_per_km?: number | null
+  average_hr?: number | null
+  max_hr?: number | null
+  elevation_m?: number | null
+  cadence?: number | null
+  laps: StravaRunLap[]
+  best_efforts?: Array<{ name: string; distance_m: number; elapsed_time_seconds: number; moving_time_seconds?: number | null }>
+  detail_synced_at?: string | null
+  needs_review: boolean
+  planned_session?: PlannedSession | null
+  completed_session_id?: number | null
+  imported_at: string
 }
 
 export interface CalendarEntry {
@@ -263,14 +299,8 @@ export interface AdaptationProposal {
 
 export interface TodayDashboard {
   date: string
-  goal?: Goal | null
-  running_phase: RunningPhase
-  climbing_phase: ClimbingPhase
-  running_readiness: ReadinessSummary
-  climbing_readiness: ReadinessSummary
   sessions: CalendarEntry[]
-  fatigue_warnings: string[]
-  pending_adaptations: AdaptationProposal[]
+  imported_runs: ImportedRunningActivity[]
 }
 
 export interface Estimate<T> {
@@ -370,6 +400,11 @@ export interface SeriesPoint {
   secondary?: number | null
   label?: string
   confidence?: Confidence | null
+  source?: string
+  external_activity_id?: string
+  activity_average_hr?: number | null
+  heart_rate_band?: string
+  sample_count?: number
 }
 
 export interface ProgressData {
@@ -379,9 +414,8 @@ export interface ProgressData {
     rolling_volume: SeriesPoint[]
     run_frequency: number
     sessions_by_type: Array<{ label: string; value: number }>
-    estimated_10k: SeriesPoint[]
-    lt2: SeriesPoint[]
     easy_efficiency: SeriesPoint[]
+    easy_efficiency_band?: string | null
     easy_efficiency_warning?: string | null
   }
   climbing: {
