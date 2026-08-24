@@ -1,5 +1,10 @@
 # AI contracts
 
+> Current normal-use scope: optional screenshot/text extraction, transcription, and note
+> organisation only. Weekly/monthly reports do not call GPT, and weekly/monthly plans are generated
+> outside the app then parsed deterministically after a visible preview. Legacy planner/adaptation
+> contracts below remain documented only for database and API compatibility.
+
 ## Document status
 
 This document records both the implemented V1 adapter contract and the remaining acceptance

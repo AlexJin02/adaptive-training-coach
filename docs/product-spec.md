@@ -1,5 +1,13 @@
 # Product specification
 
+> **Current simplified contract (August 2026):** the normal application is a factual logger,
+> descriptive progress tracker, fixed report exporter, deterministic external-plan importer,
+> Calendar, and personal notes store. Older load/fatigue/readiness/adaptation requirements below
+> describe preserved legacy compatibility, not the active UI. The current workflow is
+> `record -> progress -> weekly/monthly Markdown report -> external Web AI -> fixed plan format
+> -> preview -> Calendar`. New completed sessions do not calculate sRPE load, fatigue, readiness,
+> recovery, or automatic plan changes.
+
 > **Document status:** This is the normative V1 product and release-acceptance contract. Wording
 > such as "supports", "must", and "preserves" describes the target behavior; it is not by itself
 > evidence that a particular checkout passed acceptance. See `README.md` for current runtime

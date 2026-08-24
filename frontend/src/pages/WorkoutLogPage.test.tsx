@@ -26,6 +26,7 @@ describe('workout import degradation', () => {
       workout_kind: extracted(null),
       activity_type: extracted('Bouldering'),
       session_type: extracted('Limit Bouldering'),
+      title: extracted('Limit session'),
       date: extracted('2026-08-23'),
       distance_km: extracted(null),
       duration_minutes: extracted(120),
@@ -36,6 +37,8 @@ describe('workout import degradation', () => {
       elevation_m: extracted(null),
       cadence: extracted(null),
       power_w: extracted(null),
+      board_name: extracted(null),
+      angle: extracted(null),
       splits: extracted(['1 km — 5:00', '1 km — 4:55']),
       intervals: extracted(['4 × 6 min']),
       notes: extracted('Hard board session'),
@@ -61,7 +64,7 @@ describe('workout import degradation', () => {
     const post = mock.mock.calls.find(([input, init]) => String(input).includes('/completed-sessions') && init?.method === 'POST')
     expect(post).toBeDefined()
     const payload = JSON.parse(String(post?.[1]?.body)) as Record<string, unknown>
-    expect(payload).toMatchObject({ workout_kind: 'CLIMBING', session_type: 'Limit Bouldering', rpe: 8, max_hr: 172 })
+    expect(payload).toMatchObject({ workout_kind: 'CLIMBING', session_type: 'BOULDERING', rpe: 8, max_hr: 172 })
     expect(payload.splits).toEqual([{ description: '1 km — 5:00' }, { description: '1 km — 4:55' }])
     expect(payload.interval_blocks).toEqual([{ description: '4 × 6 min' }])
   })
@@ -70,7 +73,7 @@ describe('workout import degradation', () => {
     const mock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => new Response(JSON.stringify(init?.method === 'POST' ? { id: 9 } : { items: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
     vi.stubGlobal('fetch', mock)
     const user = userEvent.setup()
-    render(<MemoryRouter><WorkoutLogPage /></MemoryRouter>)
+    render(<MemoryRouter><CapabilityProvider><WorkoutLogPage /></CapabilityProvider></MemoryRouter>)
 
     await user.click(await screen.findByRole('button', { name: 'Log workout' }))
     await user.selectOptions(screen.getByLabelText('Activity'), 'CROSSFIT_CONDITIONING')
@@ -113,9 +116,7 @@ describe('workout import degradation', () => {
     expect(detail.getByText('Climbing attempts')).toBeInTheDocument()
     expect(detail.getByText('Strength sets')).toBeInTheDocument()
     expect(detail.getByText(/exercise: deadlift/)).toBeInTheDocument()
-    const analysis = detail.getByText((content, element) => element?.tagName === 'P' && content.startsWith('x'))
-    expect([...(analysis.textContent ?? '')]).toHaveLength(200)
-    expect(analysis).toHaveTextContent(/…$/)
+    expect(detail.queryByText((content) => content.startsWith('x'))).not.toBeInTheDocument()
   })
 
   it('requires irreversible confirmation before deleting a workout', async () => {

@@ -6,14 +6,13 @@ import { useCapabilities } from './CapabilityProvider'
 import { useTheme } from './ThemeProvider'
 
 const navigation: { to: string; label: string; short: string; icon: IconName }[] = [
-  { to: '/today', label: 'Today / Coach', short: 'Today', icon: 'today' },
+  { to: '/quick-log', label: 'Quick Log', short: 'Quick Log', icon: 'plus' },
   { to: '/calendar', label: 'Calendar', short: 'Calendar', icon: 'calendar' },
-  { to: '/athlete-state', label: 'Athlete State', short: 'State', icon: 'state' },
-  { to: '/load-readiness', label: 'Load & Readiness', short: 'Load', icon: 'load' },
   { to: '/progress', label: 'Progress', short: 'Progress', icon: 'progress' },
   { to: '/workouts', label: 'Workout Log', short: 'Log', icon: 'workouts' },
+  { to: '/reports', label: 'Training Reports', short: 'Reports', icon: 'review' },
+  { to: '/plans', label: 'Training Plan', short: 'Plan', icon: 'upload' },
   { to: '/notes', label: 'Training Notes', short: 'Notes', icon: 'notes' },
-  { to: '/review-plan', label: 'Review & Plan', short: 'Plan', icon: 'review' },
   { to: '/settings', label: 'Settings', short: 'Settings', icon: 'settings' },
 ]
 
@@ -25,7 +24,7 @@ export function AppShell(): React.JSX.Element {
   const [menuOpen, setMenuOpen] = useState(false)
   const { theme, toggleTheme } = useTheme()
   const { capabilities, connected } = useCapabilities()
-  const mobilePrimary = navigation.filter((item) => ['/today', '/calendar', '/workouts'].includes(item.to))
+  const mobilePrimary = navigation.filter((item) => ['/quick-log', '/calendar', '/workouts'].includes(item.to))
 
   return <div className="app-shell">
     <aside className={`sidebar ${menuOpen ? 'sidebar-open' : ''}`}>
@@ -45,7 +44,7 @@ export function AppShell(): React.JSX.Element {
         <IconButton className="menu-button" label="Open navigation" icon="menu" onClick={() => setMenuOpen(true)} />
         <div className="mobile-brand"><Logo /><strong>ATC</strong></div>
         <div className="topbar-spacer" />
-        <Pill tone={capabilities.ai_configured ? 'good' : 'neutral'}>{capabilities.ai_configured ? 'AI READY' : 'LOCAL CORE'}</Pill>
+        <Pill tone={capabilities.transcription ? 'good' : 'neutral'}>{capabilities.transcription ? 'IMPORT TOOLS READY' : 'LOCAL LOGGER'}</Pill>
         <IconButton label={`Use ${theme === 'dark' ? 'light' : 'dark'} theme`} icon={theme === 'dark' ? 'sun' : 'moon'} onClick={toggleTheme} />
       </header>
       <main id="main-content"><Outlet /></main>

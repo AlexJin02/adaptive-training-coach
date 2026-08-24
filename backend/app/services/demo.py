@@ -18,19 +18,19 @@ def seed_demo(db: Session, today: date | None = None) -> int:
     day = today or date.today()
     created = 0
     running_rows = [
-        (27, "Easy", 7.0, 42, 3),
-        (25, "Intervals", 9.5, 58, 7),
-        (23, "Easy", 8.0, 48, 3),
-        (20, "Long Run", 14.0, 90, 5),
-        (18, "Race", 10.0, 45, 9),
-        (16, "Easy", 8.0, 47, 3),
-        (13, "Threshold", 10.0, 62, 7),
-        (9, "Easy", 9.0, 52, 3),
-        (6, "Long Run", 16.0, 102, 5),
-        (3, "Intervals", 10.0, 60, 7),
+        (27, "EASY", 7.0, 42, 3),
+        (25, "QUALITY", 9.5, 58, 7),
+        (23, "EASY", 8.0, 48, 3),
+        (20, "LONG_RUN", 14.0, 90, 5),
+        (18, "RACE", 10.0, 45, 9),
+        (16, "EASY", 8.0, 47, 3),
+        (13, "QUALITY", 10.0, 62, 7),
+        (9, "EASY", 9.0, 52, 3),
+        (6, "LONG_RUN", 16.0, 102, 5),
+        (3, "QUALITY", 10.0, 60, 7),
     ]
     for ago, workout_type, distance, duration, rpe in running_rows:
-        session = core.create_completed_session(
+        core.create_completed_session(
             db,
             {
                 "date": day - timedelta(days=ago),
@@ -39,19 +39,17 @@ def seed_demo(db: Session, today: date | None = None) -> int:
                 "duration_minutes": duration,
                 "distance_km": distance,
                 "rpe": rpe,
-                "average_hr": 145 if workout_type == "Easy" else 168,
+                "average_hr": 145 if workout_type == "EASY" else 168,
                 "average_pace": duration * 60 / distance,
                 "is_demo": True,
             },
         )
-        core.update_running_fitness_estimate(db, session)
-        core.update_threshold_estimates(db, session)
         created += 1
     for ago, kind, duration, rpe, attempts in [
-        (22, "Easy Volume", 90, 4, 8),
-        (15, "Tension Board", 105, 8, 15),
-        (8, "Limit Bouldering", 120, 8, 18),
-        (0, "Limit Bouldering", 145, 9, 22),
+        (22, "BOULDERING", 90, 4, 8),
+        (15, "BOARD", 105, 8, 15),
+        (8, "BOULDERING", 120, 8, 18),
+        (0, "BOULDERING", 145, 9, 22),
     ]:
         core.create_completed_session(
             db,
@@ -155,7 +153,6 @@ def seed_demo(db: Session, today: date | None = None) -> int:
         },
     )
     db.commit()
-    core.create_adaptation_proposals(db)
     return created + 3
 
 

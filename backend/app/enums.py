@@ -58,6 +58,15 @@ class RunningWorkoutType(StrEnum):
     RACE = "Race"
 
 
+class RunningSessionType(StrEnum):
+    """Stable external/logging contract for running sessions."""
+
+    EASY = "EASY"
+    LONG_RUN = "LONG_RUN"
+    QUALITY = "QUALITY"
+    RACE = "RACE"
+
+
 class ClimbingWorkoutType(StrEnum):
     BOULDERING = "Bouldering"
     TENSION_BOARD = "Tension Board"
@@ -69,6 +78,25 @@ class ClimbingWorkoutType(StrEnum):
     POWER_ENDURANCE = "Power Endurance"
     EASY_VOLUME = "Easy Volume"
     OUTDOOR = "Outdoor"
+
+
+class ClimbingSessionType(StrEnum):
+    """Stable external/logging contract for climbing sessions."""
+
+    BOULDERING = "BOULDERING"
+    SPORT_CLIMBING = "SPORT_CLIMBING"
+    BOARD = "BOARD"
+
+
+class RunningSegmentKind(StrEnum):
+    WARMUP = "WARMUP"
+    EASY = "EASY"
+    INTERVAL = "INTERVAL"
+    RECOVERY = "RECOVERY"
+    STEADY = "STEADY"
+    COOLDOWN = "COOLDOWN"
+    STRIDES = "STRIDES"
+    FREEFORM = "FREEFORM"
 
 
 class FatigueDomain(StrEnum):
@@ -100,6 +128,7 @@ class PlanStatus(StrEnum):
     MOVED = "MOVED"
     REPLACED = "REPLACED"
     REST = "REST"
+    CANCELLED = "CANCELLED"
 
 
 class SessionPriority(StrEnum):

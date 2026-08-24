@@ -43,10 +43,12 @@ def test_workout_extraction_contract_preserves_rpe_and_structured_fields(monkeyp
     monkeypatch.setattr(functions, "_responses_json", fake_call)
     result = extract_workout_from_text("Threshold run, RPE 7")
     assert result.workout_kind.value == "RUNNING"
-    assert result.session_type.value == "Threshold"
+    assert result.session_type.value == "QUALITY"
     assert result.rpe.value == 7
     assert result.intervals.value == ["1 km @ 4:20"]
-    assert {"max_hr", "splits", "intervals"}.issubset(captured["schema"]["properties"])
+    assert {"title", "board_name", "angle", "max_hr", "splits", "intervals"}.issubset(
+        captured["schema"]["properties"]
+    )
 
 
 def test_workout_extraction_normalises_voice_friendly_formats(monkeypatch) -> None:  # noqa: ANN001

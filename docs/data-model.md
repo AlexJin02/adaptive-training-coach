@@ -1,5 +1,10 @@
 # Data model
 
+> The current simplified workflow writes factual sessions, descriptive benchmarks, fixed report
+> inputs, imported-plan history, monthly blocks, and Calendar revisions. Legacy stress, fatigue,
+> readiness, recovery, and adaptation tables are retained for migration/backup compatibility but
+> are not updated by normal completed-workout saving or external plan import.
+
 ## Document status
 
 This file describes the SQLAlchemy model and initial Alembic migration in this checkout. Where a
@@ -188,6 +193,16 @@ Optional source-note link, category, principle text, active flag, athlete-approv
 timestamps. The API creates explicitly approved principles; note processing cannot create one.
 
 ## Imports and settings
+
+### `monthly_training_blocks` and `imported_plans`
+
+An accepted `TRAINING_MONTHLY_PLAN_V1` is retained verbatim in `imported_plans` and saved as a
+structured JSON monthly block. The structured content separates running phase, objective,
+session frequency/structure, weekly distance targets, quality and long-run guidance, principles,
+climbing frequency/structure and board focus, auxiliary guidance, and general notes. Older V1
+imports without optional frequency or principle fields are normalised when read and remain valid.
+Editing creates a new active monthly-block revision and archives the previous row. Monthly import
+does not create Calendar sessions; only accepted weekly-plan sessions do that.
 
 ### `media_imports`
 

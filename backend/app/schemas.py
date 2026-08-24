@@ -21,6 +21,7 @@ from app.enums import (
     SessionPriority,
     Sport,
 )
+from app.session_types import normalise_session_type
 
 
 class APIModel(BaseModel):
@@ -129,6 +130,11 @@ class PlannedSessionCreate(APIModel):
             and self.target_rpe_min > self.target_rpe_max
         ):
             raise ValueError("target_rpe_min cannot exceed target_rpe_max")
+        if self.status != PlanStatus.REST:
+            normalised = normalise_session_type(self.sport, self.workout_type)
+            if normalised is None:
+                raise ValueError("Choose a valid session type for this sport")
+            self.workout_type = normalised
         return self
 
 
@@ -176,6 +182,7 @@ class ClimbingAttemptIn(APIModel):
     grade: str | None = None
     attempts: int = Field(1, ge=1)
     sent: bool = False
+    send_count: int = Field(0, ge=0)
     flash: bool = False
     repeat: bool = False
     project: bool = False
@@ -184,6 +191,8 @@ class ClimbingAttemptIn(APIModel):
 
 class ClimbingDetailIn(APIModel):
     gym_or_crag: str | None = None
+    board_name: str | None = None
+    angle_degrees: int | None = Field(None, ge=0, le=90)
     hard_attempts: int | None = Field(None, ge=0)
     maximum_attempted: str | None = None
     maximum_sent: str | None = None
@@ -215,6 +224,7 @@ class CompletedSessionCreate(APIModel):
     duration_minutes: float = Field(gt=0)
     sport: Sport
     workout_type: str
+    title: str | None = None
     rpe: float | None = Field(None, ge=1, le=10)
     notes: str = ""
     running: RunningDetailIn | None = None
@@ -225,6 +235,10 @@ class CompletedSessionCreate(APIModel):
 
     @model_validator(mode="after")
     def validate_sport_detail(self) -> CompletedSessionCreate:
+        normalised = normalise_session_type(self.sport, self.workout_type)
+        if normalised is None:
+            raise ValueError("Choose a valid session type for this sport")
+        self.workout_type = normalised
         if self.sport == Sport.RUNNING and self.running is None:
             raise ValueError("running detail is required for a RUNNING session")
         if self.sport == Sport.CLIMBING and self.climbing is None:

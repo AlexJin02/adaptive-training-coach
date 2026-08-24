@@ -44,7 +44,6 @@ from app.training_engine.config import (
 from app.training_engine.fatigue import StressEvent, calculate_fatigue
 from app.training_engine.progression import decide_mileage_target
 from app.training_engine.readiness import RecoveryInputs, calculate_readiness
-from app.training_engine.session_load import calculate_session_load
 
 ENGINE_DEFAULTS: dict[str, Any] = {
     "base_stress_divisor": 90,
@@ -250,21 +249,6 @@ def create_completed_session(db: Session, values: dict[str, Any]) -> models.Comp
     sport = Sport(values["workout_kind"])
     duration = float(values["duration_minutes"])
     rpe = values.get("rpe")
-    exercises = [str(row.get("exercise", "")) for row in values.get("strength_sets", [])]
-    engine_config = engine_configuration(db)
-    load = calculate_session_load(
-        sport=sport,
-        workout_type=values["session_type"],
-        duration_minutes=duration,
-        rpe=float(rpe) if rpe is not None else None,
-        hard_attempts=values.get("hard_attempts"),
-        exercises=exercises,
-        stress_divisor=float(engine_config.get("base_stress_divisor", 90)),
-        max_base_stress=float(engine_config.get("base_stress_cap", 10)),
-        hard_attempt_threshold=int(engine_config.get("hard_attempt_threshold", 10)),
-        hard_attempt_increment=float(engine_config.get("hard_attempt_increment", 0.015)),
-        hard_attempt_cap=float(engine_config.get("hard_attempt_cap", 1.25)),
-    )
     planned_id = int(values["planned_session_id"]) if values.get("planned_session_id") else None
     item = models.CompletedSession(
         athlete_id=1,
@@ -274,10 +258,11 @@ def create_completed_session(db: Session, values: dict[str, Any]) -> models.Comp
         duration_minutes=duration,
         sport=sport,
         workout_type=values["session_type"],
+        title=values.get("title") or values["session_type"],
         rpe=float(rpe) if rpe is not None else None,
         notes=values.get("notes") or "",
-        srpe_load=load.srpe_load,
-        base_stress=load.base_stress,
+        srpe_load=None,
+        base_stress=None,
         subjective_feedback_text=values.get("subjective_feedback_text"),
         subjective_feedback_source=values.get("subjective_feedback_source") or "NONE",
         subjective_feedback_created_at=(
@@ -309,6 +294,8 @@ def create_completed_session(db: Session, values: dict[str, Any]) -> models.Comp
     elif sport == Sport.CLIMBING:
         climbing = models.ClimbingSessionDetail(
             gym_or_crag=values.get("gym_or_crag"),
+            board_name=values.get("board_name"),
+            angle_degrees=values.get("angle"),
             hard_attempts=values.get("hard_attempts"),
             maximum_attempted=values.get("max_attempted"),
             maximum_sent=values.get("max_sent"),
@@ -322,6 +309,11 @@ def create_completed_session(db: Session, values: dict[str, Any]) -> models.Comp
                     grade=attempt.get("grade"),
                     attempts=int(attempt.get("attempts") or 1),
                     sent=bool(attempt.get("sent") or outcome in {"send", "sent", "flash"}),
+                    send_count=int(
+                        attempt.get("send_count")
+                        if attempt.get("send_count") is not None
+                        else bool(attempt.get("sent") or outcome in {"send", "sent", "flash"})
+                    ),
                     flash=bool(attempt.get("flash") or outcome == "flash"),
                     repeat=bool(attempt.get("repeat") or outcome == "repeat"),
                     project=bool(attempt.get("project") or outcome == "project"),
@@ -349,16 +341,6 @@ def create_completed_session(db: Session, values: dict[str, Any]) -> models.Comp
             )
         item.strength = strength
 
-    for row in load.domain_stresses:
-        item.domain_stresses.append(
-            models.SessionDomainStress(
-                domain=row.domain,
-                coefficient=row.coefficient,
-                multiplier=row.multiplier,
-                stress=row.stress,
-                algorithm_version=load.algorithm_version,
-            )
-        )
     if planned_id:
         planned = db.get(models.PlannedSession, planned_id)
         if planned:
@@ -465,7 +447,6 @@ def delete_completed_session(db: Session, session_id: int) -> int:
                 {"status": PlanStatus.PLANNED},
                 "Linked completed record was permanently deleted",
             )
-    _rebuild_automatic_running_estimates(db)
     return session_id
 
 
@@ -1615,7 +1596,10 @@ def calendar_entries(db: Session, start: date, end: date) -> list[dict[str, Any]
     plans = list(
         db.scalars(
             select(models.PlannedSession)
-            .where(models.PlannedSession.session_date.between(start, end))
+            .where(
+                models.PlannedSession.session_date.between(start, end),
+                models.PlannedSession.status != PlanStatus.CANCELLED,
+            )
             .order_by(models.PlannedSession.session_date, models.PlannedSession.id)
         )
     )

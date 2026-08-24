@@ -1,4 +1,9 @@
-# Deterministic training engine
+# Deterministic training engine (legacy compatibility)
+
+> The simplified application no longer calls this engine from normal workout logging, reports,
+> Progress, or plan import. Historical tables, APIs, and tests remain so existing databases and
+> backups are preserved safely. Duration and RPE are raw observations and are not converted into
+> load in the current completed-workout flow.
 
 ## Purpose and guarantees
 

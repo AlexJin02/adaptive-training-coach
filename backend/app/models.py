@@ -209,6 +209,7 @@ class CompletedSession(TimestampMixin, Base):
     duration_minutes: Mapped[float] = mapped_column(Float)
     sport: Mapped[Sport] = mapped_column(enum_column(Sport), index=True)
     workout_type: Mapped[str] = mapped_column(String(80))
+    title: Mapped[str | None] = mapped_column(String(200))
     rpe: Mapped[float | None] = mapped_column(Float)
     notes: Mapped[str] = mapped_column(Text, default="")
     srpe_load: Mapped[float | None] = mapped_column(Float)
@@ -260,6 +261,8 @@ class ClimbingSessionDetail(Base):
         ForeignKey("completed_sessions.id", ondelete="CASCADE"), primary_key=True
     )
     gym_or_crag: Mapped[str | None] = mapped_column(String(200))
+    board_name: Mapped[str | None] = mapped_column(String(120))
+    angle_degrees: Mapped[int | None] = mapped_column(Integer)
     hard_attempts: Mapped[int | None] = mapped_column(Integer)
     maximum_attempted: Mapped[str | None] = mapped_column(String(32))
     maximum_sent: Mapped[str | None] = mapped_column(String(32))
@@ -281,6 +284,7 @@ class ClimbingAttempt(Base):
     grade: Mapped[str | None] = mapped_column(String(32))
     attempts: Mapped[int] = mapped_column(Integer, default=1)
     sent: Mapped[bool] = mapped_column(Boolean, default=False)
+    send_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     flash: Mapped[bool] = mapped_column(Boolean, default=False)
     repeat: Mapped[bool] = mapped_column(Boolean, default=False)
     project: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -581,8 +585,22 @@ class MonthlyTrainingBlock(TimestampMixin, Base):
     month_start: Mapped[date] = mapped_column(Date, index=True)
     month_end: Mapped[date] = mapped_column(Date)
     content: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
-    source_proposal_id: Mapped[int] = mapped_column(ForeignKey("planning_proposals.id"))
+    source_proposal_id: Mapped[int | None] = mapped_column(ForeignKey("planning_proposals.id"))
     status: Mapped[str] = mapped_column(String(16), default="ACTIVE", index=True)
+
+
+class ImportedPlan(TimestampMixin, Base):
+    """Immutable record of an externally generated plan accepted by the athlete."""
+
+    __tablename__ = "imported_plans"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    cadence: Mapped[str] = mapped_column(String(16), index=True)
+    period_start: Mapped[date] = mapped_column(Date, index=True)
+    period_end: Mapped[date] = mapped_column(Date)
+    raw_markdown: Mapped[str] = mapped_column(Text)
+    parsed_content: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    imported_session_ids: Mapped[list[int]] = mapped_column(JSON, default=list)
 
 
 class TrainingNote(TimestampMixin, Base):

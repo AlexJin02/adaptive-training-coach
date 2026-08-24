@@ -146,6 +146,13 @@ def progress_data(db: Session, range_name: str, today: date | None = None) -> di
         if start - timedelta(days=27) <= item.session_date <= end
     ]
     sessions = [item for item in history_sessions if start <= item.session_date <= end]
+    running_sessions = [item for item in sessions if item.sport == Sport.RUNNING]
+    climbing_sessions = [item for item in sessions if item.sport == Sport.CLIMBING]
+    climbing_weekly: dict[date, int] = defaultdict(int)
+    climbing_monthly: dict[str, int] = defaultdict(int)
+    for item in climbing_sessions:
+        climbing_weekly[item.session_date - timedelta(days=item.session_date.weekday())] += 1
+        climbing_monthly[item.session_date.strftime("%Y-%m")] += 1
     monthly: dict[str, float] = defaultdict(float)
     daily: dict[date, float] = defaultdict(float)
     for item in history_sessions:
@@ -158,6 +165,7 @@ def progress_data(db: Session, range_name: str, today: date | None = None) -> di
         for month, value in sorted(monthly.items())
     ]
     rolling_series: list[dict[str, Any]] = []
+    weekly_mileage: list[dict[str, Any]] = []
     cursor = start
     while cursor <= end:
         seven = sum(
@@ -172,6 +180,9 @@ def progress_data(db: Session, range_name: str, today: date | None = None) -> di
                 "value": round(seven, 2),
                 "secondary": round(twenty_eight / 4, 2),
             }
+        )
+        weekly_mileage.append(
+            {"date": cursor.isoformat(), "value": round(seven, 2), "label": "7-day total"}
         )
         cursor += timedelta(days=7)
     estimates = list(
@@ -245,7 +256,23 @@ def progress_data(db: Session, range_name: str, today: date | None = None) -> di
     return {
         "running": {
             "monthly_mileage": monthly_series,
+            "weekly_mileage": weekly_mileage,
             "rolling_volume": rolling_series,
+            "run_frequency": len(running_sessions),
+            "sessions_by_type": [
+                {"label": workout_type, "value": count}
+                for workout_type, count in sorted(
+                    defaultdict(
+                        int,
+                        {
+                            workout_type: sum(
+                                item.workout_type == workout_type for item in running_sessions
+                            )
+                            for workout_type in ("EASY", "LONG_RUN", "QUALITY", "RACE")
+                        },
+                    ).items()
+                )
+            ],
             "estimated_10k": [
                 {
                     "date": (item.source_date or item.created_at.date()).isoformat(),
@@ -278,8 +305,42 @@ def progress_data(db: Session, range_name: str, today: date | None = None) -> di
         "climbing": {
             "tb2_benchmarks": [serializers.tb2(item) for item in tb2_rows],
             "gym_sets": [serializers.gym_set(item) for item in gym_rows],
+            "session_count": len(climbing_sessions),
+            "total_duration_minutes": round(
+                sum(item.duration_minutes for item in climbing_sessions), 1
+            ),
+            "weekly_sessions": [
+                {"date": week.isoformat(), "value": count, "label": "Sessions"}
+                for week, count in sorted(climbing_weekly.items())
+            ],
+            "monthly_sessions": [
+                {"date": f"{month}-01", "value": count, "label": month}
+                for month, count in sorted(climbing_monthly.items())
+            ],
+            "sessions_by_type": [
+                {
+                    "label": workout_type,
+                    "value": sum(item.workout_type == workout_type for item in climbing_sessions),
+                }
+                for workout_type in ("BOULDERING", "SPORT_CLIMBING", "BOARD")
+            ],
+            "grade_attempts": _climbing_grade_distribution(climbing_sessions, sends=False),
+            "grade_sends": _climbing_grade_distribution(climbing_sessions, sends=True),
         },
     }
+
+
+def _climbing_grade_distribution(
+    sessions: list[models.CompletedSession], *, sends: bool
+) -> list[dict[str, Any]]:
+    totals: dict[str, int] = defaultdict(int)
+    for item in sessions:
+        if item.climbing is None:
+            continue
+        for attempt in item.climbing.attempts:
+            label = attempt.grade or attempt.problem or "Unspecified"
+            totals[label] += attempt.send_count if sends else attempt.attempts
+    return [{"label": label, "value": value} for label, value in sorted(totals.items())]
 
 
 def build_running_subjective_feedback_summary(

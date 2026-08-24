@@ -170,7 +170,7 @@ def test_fatigue_api_labels_engine_boundaries(
 
 def test_adaptation_edits_reject_unknown_and_negative_fields(client: TestClient) -> None:
     assert client.post("/api/v1/demo/seed").status_code == 200
-    proposals = client.get("/api/v1/adaptations").json()["items"]
+    proposals = client.post("/api/v1/adaptations/propose").json()["items"]
     assert proposals
     proposal_id = proposals[0]["id"]
 
@@ -345,4 +345,4 @@ def test_weekly_review_uses_plan_history_and_historical_climbing_state(
     assert set(trends) == {"range", "running", "climbing", "load"}
     assert trends["running"]["weekly_distance_km"][-1]["value"] == 17
     assert trends["climbing"]["weekly_minutes"][-1]["value"] == 90
-    assert trends["load"]["weekly_srpe"][-1]["value"] > 0
+    assert trends["load"]["weekly_srpe"][-1]["value"] == 0

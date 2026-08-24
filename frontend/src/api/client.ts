@@ -10,7 +10,10 @@ import type {
   FatigueValue,
   Goal,
   GymSet,
+  MonthlyPlanContent,
+  MonthlyTrainingBlock,
   PlannedSession,
+  PlanParsePreview,
   ReviewPlanProposal,
   ProgressData,
   ReadinessSummary,
@@ -95,6 +98,12 @@ async function download(path: string): Promise<Blob> {
   return response.blob()
 }
 
+async function requestText(path: string): Promise<string> {
+  const response = await fetch(`${API_BASE}${path}`, { headers: { Accept: 'text/plain' } })
+  if (!response.ok) throw new ApiError(`Request failed (${response.status})`, response.status)
+  return response.text()
+}
+
 const json = (body: unknown): string => JSON.stringify(body)
 
 export const api = {
@@ -111,6 +120,8 @@ export const api = {
   setClimbingPhase: (phase: string) => request<ClimbingState>('/athlete-state/climbing/phase', { method: 'PATCH', body: json({ phase }) }),
   plannedSessions: (start?: string, end?: string) => request<ApiList<PlannedSession>>(`/planned-sessions${start && end ? `?start=${start}&end=${end}` : ''}`),
   createPlannedSession: (body: Partial<PlannedSession>) => request<PlannedSession>('/planned-sessions', { method: 'POST', body: json(body) }),
+  updatePlannedSession: (id: string | number, body: Partial<PlannedSession>) => request<PlannedSession>(`/planned-sessions/${id}`, { method: 'PATCH', body: json(body) }),
+  deletePlannedSession: (id: string | number) => request<{ deleted: boolean; id: number }>(`/planned-sessions/${id}`, { method: 'DELETE' }),
   skipPlannedSession: (id: string | number) => request<{ session: PlannedSession; adaptations: AdaptationProposal[] }>(`/planned-sessions/${id}/skip`, { method: 'POST', body: '{}' }),
   completedSessions: () => request<ApiList<CompletedSession>>('/completed-sessions'),
   createCompletedSession: (body: Record<string, unknown>) => request<Record<string, unknown>>('/completed-sessions', { method: 'POST', body: json(body) }),
@@ -119,6 +130,13 @@ export const api = {
   readiness: () => request<ApiList<ReadinessSummary>>('/load-readiness/readiness'),
   saveRecoveryCheckIn: (body: RecoveryCheckIn) => request<RecoveryCheckIn>('/recovery-checkins', { method: 'POST', body: json(body) }),
   progress: (range: string) => request<ProgressData>(`/progress?range=${encodeURIComponent(range)}`),
+  weeklyReport: (weekStart: string) => requestText(`/training-reports/weekly?week_start=${encodeURIComponent(weekStart)}`),
+  monthlyReport: (month: string) => requestText(`/training-reports/monthly?month=${encodeURIComponent(month)}`),
+  planTemplate: (cadence: 'weekly' | 'monthly') => requestText(`/training-plans/template/${cadence}`),
+  parsePlan: (cadence: 'WEEKLY' | 'MONTHLY', markdown: string) => request<PlanParsePreview>('/training-plans/parse', { method: 'POST', body: json({ cadence, markdown }) }),
+  importPlan: (cadence: 'WEEKLY' | 'MONTHLY', markdown: string) => request<PlanParsePreview>('/training-plans/import', { method: 'POST', body: json({ cadence, markdown }) }),
+  currentMonthlyBlock: () => request<MonthlyTrainingBlock | null>('/training-plans/monthly/current'),
+  updateMonthlyBlock: (id: number, content: Omit<MonthlyPlanContent, 'month' | 'raw_plan_text'>) => request<MonthlyTrainingBlock>(`/training-plans/monthly/${id}`, { method: 'PATCH', body: json(content) }),
   adaptations: () => request<ApiList<AdaptationProposal>>('/adaptations'),
   proposeAdaptation: () => request<ApiList<AdaptationProposal>>('/adaptations/propose', { method: 'POST', body: '{}' }),
   decideAdaptation: (id: string | number, decision: 'ACCEPT' | 'REJECT', proposedPlan?: Record<string, unknown> | string) => request<AdaptationProposal>(`/adaptations/${id}/decision`, { method: 'POST', body: json({ decision, proposed_plan: proposedPlan }) }),

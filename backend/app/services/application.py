@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import models
-from app.enums import AdaptationDecision, NoteCategory
+from app.enums import AdaptationDecision, NoteCategory, PlanStatus
 from app.services import core
 
 
@@ -19,6 +19,7 @@ def list_planned_sessions(
     db: Session, start: date | None = None, end: date | None = None
 ) -> list[models.PlannedSession]:
     statement = select(models.PlannedSession)
+    statement = statement.where(models.PlannedSession.status != PlanStatus.CANCELLED)
     if start is not None and end is not None:
         statement = statement.where(models.PlannedSession.session_date.between(start, end))
     return list(
@@ -37,6 +38,13 @@ def update_planned_session(
     )
 
 
+def get_planned_session(db: Session, session_id: int) -> models.PlannedSession:
+    item = db.get(models.PlannedSession, session_id)
+    if item is None:
+        raise LookupError("Planned session not found")
+    return item
+
+
 def skip_planned_session(
     db: Session, session_id: int
 ) -> tuple[models.PlannedSession, list[models.AdaptationEvent]]:
@@ -47,13 +55,18 @@ def skip_planned_session(
 
 
 def record_completed_session(db: Session, values: dict[str, Any]) -> models.CompletedSession:
-    item = core.create_completed_session(db, values)
-    core.update_running_fitness_estimate(db, item)
-    core.update_threshold_estimates(db, item)
-    core.persist_load_readiness_snapshot(db, source_key=f"session:{item.id}")
-    core.analyse_completed_session_with_ai(db, item)
-    core.create_adaptation_proposals(db)
-    return item
+    # A log is factual evidence only. Legacy derived data remains readable but new records no
+    # longer trigger load/readiness calculations, AI analysis, or autonomous plan changes.
+    return core.create_completed_session(db, values)
+
+
+def cancel_planned_session(db: Session, session_id: int) -> models.PlannedSession:
+    item = db.get(models.PlannedSession, session_id)
+    if item is None:
+        raise LookupError("Planned session not found")
+    return core.update_planned_session(
+        db, item, {"status": "CANCELLED"}, "Removed from active Calendar"
+    )
 
 
 def delete_completed_session(db: Session, session_id: int) -> int:
@@ -61,10 +74,7 @@ def delete_completed_session(db: Session, session_id: int) -> int:
 
 
 def record_recovery_checkin(db: Session, values: dict[str, Any]) -> models.RecoveryCheckin:
-    item = core.create_recovery_checkin(db, values)
-    core.persist_load_readiness_snapshot(db, source_key=f"recovery:{item.id}")
-    core.create_adaptation_proposals(db)
-    return item
+    return core.create_recovery_checkin(db, values)
 
 
 def create_running_estimate(db: Session, values: dict[str, Any]) -> models.RunningFitnessEstimate:

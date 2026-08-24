@@ -1,8 +1,10 @@
 export type Sport = 'RUNNING' | 'CLIMBING'
+export type RunningSessionType = 'EASY' | 'LONG_RUN' | 'QUALITY' | 'RACE'
+export type ClimbingSessionType = 'BOULDERING' | 'SPORT_CLIMBING' | 'BOARD'
 export type WorkoutKind = Sport | 'STRENGTH' | 'CROSSFIT_CONDITIONING' | 'MOBILITY_RECOVERY'
 export type Confidence = 'LOW' | 'MODERATE' | 'HIGH'
 export type ReadinessLabel = 'GOOD' | 'MODERATE' | 'LOW'
-export type SessionStatus = 'PLANNED' | 'COMPLETED' | 'MODIFIED' | 'SKIPPED' | 'MOVED' | 'REPLACED' | 'REST'
+export type SessionStatus = 'PLANNED' | 'COMPLETED' | 'MODIFIED' | 'SKIPPED' | 'MOVED' | 'REPLACED' | 'REST' | 'CANCELLED'
 export type AdaptationAction = 'KEEP' | 'REDUCE_VOLUME' | 'REDUCE_INTENSITY' | 'MOVE' | 'REPLACE' | 'ADD_RECOVERY' | 'PROGRESS'
 export type AdaptationSource = 'RULE_ENGINE' | 'AI' | 'MANUAL'
 export type GoalType = 'RUNNING_MILEAGE' | 'HALF_MARATHON' | 'MARATHON' | 'BOULDERING' | 'LEAD_CLIMBING'
@@ -100,6 +102,8 @@ export interface CompletedSession {
   cadence?: number | null
   power_w?: number | null
   gym_or_crag?: string | null
+  board_name?: string | null
+  angle?: number | null
   hard_attempts?: number | null
   max_attempted?: string | null
   max_sent?: string | null
@@ -131,6 +135,87 @@ export interface CalendarEntry {
   planned?: PlannedSession | null
   completed?: CompletedSession | null
   status: SessionStatus
+}
+
+export interface ParsedPlanSession {
+  date: string
+  day: string
+  session_number: number
+  workout_kind: WorkoutKind
+  session_type: string
+  title: string
+  planned_distance_km?: number | null
+  planned_duration_minutes?: number | null
+  target_rpe_min?: number | null
+  target_rpe_max?: number | null
+  target_rpe?: number | null
+  description: string
+  notes: string
+  structured_blocks: Array<Record<string, unknown>>
+  raw_workout_text: string
+  status: SessionStatus
+  board_name?: string | null
+  angle?: number | null
+}
+
+export interface MonthlyWeekTarget {
+  week: number
+  distance_km: number
+}
+
+export interface MonthlySessionStructureItem {
+  session_type: string
+  sessions_per_week: number
+}
+
+export interface MonthlyPlanContent {
+  month: string
+  running: {
+    phase: string
+    monthly_objective: string
+    sessions_per_week: number | null
+    session_structure: MonthlySessionStructureItem[]
+    weekly_distance_targets: MonthlyWeekTarget[]
+    quality_guidance: string
+    long_run_guidance: string
+    long_run_targets: MonthlyWeekTarget[]
+    key_principles: string[]
+    other_notes: string
+  }
+  climbing: {
+    phase: string
+    sessions_per_week: number | null
+    target_structure: MonthlySessionStructureItem[]
+    board_focus: string
+    key_principles: string[]
+    other_notes: string
+  }
+  auxiliary: {
+    strength: string
+    mobility: string
+  }
+  general_notes: string
+  raw_plan_text: string
+}
+
+export interface MonthlyTrainingBlock {
+  id: number
+  month_start: string
+  month_end: string
+  content: MonthlyPlanContent
+  status: string
+}
+
+export interface PlanParsePreview {
+  cadence: 'WEEKLY' | 'MONTHLY'
+  period_start: string
+  period_end: string
+  sessions?: ParsedPlanSession[]
+  block?: MonthlyPlanContent
+  warnings: string[]
+  can_import: boolean
+  import_id?: number
+  imported_session_ids?: number[]
 }
 
 export interface ReadinessComponent {
@@ -290,7 +375,10 @@ export interface SeriesPoint {
 export interface ProgressData {
   running: {
     monthly_mileage: SeriesPoint[]
+    weekly_mileage: SeriesPoint[]
     rolling_volume: SeriesPoint[]
+    run_frequency: number
+    sessions_by_type: Array<{ label: string; value: number }>
     estimated_10k: SeriesPoint[]
     lt2: SeriesPoint[]
     easy_efficiency: SeriesPoint[]
@@ -299,6 +387,13 @@ export interface ProgressData {
   climbing: {
     tb2_benchmarks: TB2Benchmark[]
     gym_sets: GymSet[]
+    session_count: number
+    total_duration_minutes: number
+    weekly_sessions: SeriesPoint[]
+    monthly_sessions: SeriesPoint[]
+    sessions_by_type: Array<{ label: string; value: number }>
+    grade_attempts: Array<{ label: string; value: number }>
+    grade_sends: Array<{ label: string; value: number }>
   }
 }
 
@@ -416,6 +511,7 @@ export interface WorkoutExtraction {
   workout_kind: ExtractionField<WorkoutKind | null>
   activity_type: ExtractionField<string | null>
   session_type: ExtractionField<string | null>
+  title: ExtractionField<string | null>
   date: ExtractionField<string | null>
   distance_km: ExtractionField<number | null>
   duration_minutes: ExtractionField<number | null>
@@ -426,6 +522,8 @@ export interface WorkoutExtraction {
   elevation_m: ExtractionField<number | null>
   cadence: ExtractionField<number | null>
   power_w: ExtractionField<number | null>
+  board_name: ExtractionField<string | null>
+  angle: ExtractionField<number | null>
   splits: ExtractionField<string[] | null>
   intervals: ExtractionField<string[] | null>
   notes?: ExtractionField<string | null>

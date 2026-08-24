@@ -1,25 +1,24 @@
 # Adaptive Running & Climbing Training Coach
 
-A local-first training application for one athlete who trains running and climbing concurrently. It records what was planned and what actually happened, calculates transparent workload and fatigue heuristics, maintains separate running and climbing readiness, shows long-term progress, and proposes conservative changes to the next seven days.
+A local-first factual training log for one athlete who runs and climbs. It preserves detailed completed sessions, shows descriptive progress, exports stable weekly/monthly Markdown reports, and deterministically imports externally generated plans into Calendar.
 
-This is not a medical device and it does not produce a hidden "AI fitness score." Calculations and adaptation evidence remain inspectable, and no proposal changes the plan until the athlete accepts it.
+The application is deliberately not an autonomous coach. It does not turn duration and RPE into load, fatigue, readiness, or recovery scores. A Web AI can analyse exported reports and return a plan using the supplied fixed template; the app validates and previews that plan before importing it.
 
 This README describes the checked-in runtime. [Product specification](docs/product-spec.md) is the normative V1 acceptance contract; where it is more ambitious than the implementation, the implementation-status notes in [AI contracts](docs/ai-contracts.md), [data model](docs/data-model.md), and [training engine](docs/training-engine.md) take precedence as a statement of current behavior.
 
 ## What it covers
 
-- Today / Coach dashboard, weekly calendar, planned sessions, and fast workout logging
+- Quick Log, weekly Calendar, editable planned sessions, and factual workout history
 - Running state, volume, race estimates, LT1/LT2 evidence, and progression charts
 - Climbing state, angle-aware Tension Board 2 benchmarks, home-gym set history, and route benchmarks
-- Session-RPE load, six-domain decaying fatigue, recovery check-ins, and sport-specific readiness
-- Deterministic plan comparison and constrained adaptation proposals with revision/decision history
-- Screenshot and natural-language workout extraction with preview-before-save
+- Strict running types (`EASY`, `LONG_RUN`, `QUALITY`, `RACE`) and climbing types (`BOULDERING`, `SPORT_CLIMBING`, `BOARD`)
+- Screenshot, natural-language, and voice-assisted workout entry with preview-before-save
 - Text and voice Training Notes, structured into Running, Climbing, or Strength & Mobility
-- Combined Weekly and Monthly Review & Plan previews with explicit approval
-- Optional editable post-run voice feedback after screenshot extraction
-- Weekly reviews, versioned JSON backup/restore, CSV export, and removable demo data
+- Fixed `TRAINING_WEEKLY_REPORT_V1` and `TRAINING_MONTHLY_REPORT_V1` Markdown exports
+- Deterministic `TRAINING_WEEKLY_PLAN_V1` and `TRAINING_MONTHLY_PLAN_V1` preview/import, with a structured readable monthly-block view
+- Versioned JSON backup/restore, CSV export, and removable demo data
 
-Strength, CrossFit/conditioning, and mobility are supporting activities. They affect fatigue but do not have their own goal, athlete-state, readiness, or progress dashboard.
+Strength, CrossFit/conditioning, and mobility remain supporting factual records. They do not have a separate goal or analytical score.
 
 ## Architecture
 
@@ -29,7 +28,7 @@ The browser client is React, strict TypeScript, and Vite. The local API is FastA
 frontend/                         backend/
   React pages and components       app/api.py           HTTP boundary
   typed API client                 app/services/        use cases
-  views and preview arithmetic     app/training_engine/ deterministic rules
+  views and formatting             app/services/        reports and plan parser
                                     app/ai/              optional provider calls
                                     app/models.py, db.py relational persistence
 
@@ -96,7 +95,6 @@ make clean         # remove generated caches/build output, not athlete data
 | `CORS_ORIGINS` | JSON array of allowed browser origins | Vite localhost origins |
 | `OPENAI_API_KEY` | Optional provider credential | AI features report unavailable when blank |
 | `OPENAI_MODEL` | Text analysis/coaching model | Chosen in backend configuration |
-| `OPENAI_PLANNER_MODEL` | Weekly and monthly structured planning model | `gpt-5-mini` |
 | `OPENAI_VISION_MODEL` | Screenshot extraction model | Chosen in backend configuration |
 | `OPENAI_TRANSCRIBE_MODEL` | Voice transcription model | Chosen in backend configuration |
 | `RETAIN_RAW_SCREENSHOTS` | Retain uploaded screenshots locally | `false` |
@@ -124,9 +122,9 @@ Open the HTTPS URL printed by Tailscale on the phone. All reads and writes still
 database on the Mac. The Mac must remain awake, connected to Tailscale, and running the server.
 Use Tailscale **Serve**, not Funnel: Serve is private to the tailnet, while Funnel is public.
 
-## AI-assisted workflows
+## Data and optional AI-assisted entry
 
-All provider calls run on the backend. The application has separate typed functions for image extraction, text extraction, transcription, note processing, completed-session analysis, plan adaptation, and weekly review instead of one universal prompt.
+All provider calls run on the backend. OpenAI is used only for optional screenshot/text extraction, transcription, and note organisation in the normal UI. Reports and pasted-plan parsing are deterministic and work without an API key.
 
 Workout import always follows:
 
@@ -138,7 +136,15 @@ Unknown extraction values remain `null`; extracted workout fields retain confide
 
 Voice notes use the browser `MediaRecorder` and send audio only to the configured transcription provider. The transcription prompt is tuned for Chinese, English, and mixed running/climbing terminology. The transcript and organised note are editable before saving.
 
-Training Notes are advisory knowledge, not measured evidence. `use_for_coaching` is false by default, and enabling it only makes the note eligible for a bounded AI context; it does not turn the note into a deterministic rule.
+Training Notes are personal knowledge, not measured evidence. They do not change calculations or Calendar plans.
+
+The external planning loop is:
+
+```text
+Training data -> fixed Markdown report -> Web AI -> fixed plan template -> preview -> Calendar
+```
+
+Weekly imports create detailed Calendar sessions. Monthly imports save one current training block and do not create a month of daily sessions.
 
 ## Testing
 
@@ -156,11 +162,11 @@ The automated suite includes the required running, climbing, concurrent-strength
 
 Use Settings to create a versioned full JSON backup, restore a compatible backup after validation, or export useful training tables as CSV. Backups include durable athlete data and omit secrets and temporary raw media. Restore is transactional: validation failure leaves the current database unchanged. Keep exported files somewhere outside `backend/data/` if they need independent retention.
 
-Plan edits preserve revision snapshots, moves/replacements retain the original plan, and gym-set and benchmark updates append historical rows. Running estimates and load/readiness snapshots are also append-only evidence. Profile/settings fields are current-value records unless a dedicated history table is present. Never use a copied SQLite file while the app is writing to it as a substitute for the supported backup flow.
+Plan edits preserve revision snapshots, deleted planned sessions are soft-cancelled, and gym-set and benchmark updates preserve history. Historical load/readiness tables from older versions remain migration-safe but are dormant in the simplified workflow. Profile/settings fields are current-value records unless a dedicated history table is present. Never use a copied SQLite file while the app is writing to it as a substitute for the supported backup flow.
 
 ## Demo data
 
-Demo data is opt-in, visibly labelled, and removable without deleting real athlete records. It contains several weeks of running, climbing, TB2, strength, recovery, adaptation, and note examples so charts can be evaluated immediately. It is never silently loaded in a normal profile.
+Demo data is opt-in, visibly labelled, and removable without deleting real athlete records. It contains factual running, climbing, TB2, strength, and note examples so charts and reports can be evaluated immediately. It is never silently loaded in a normal profile.
 
 ## GitHub workflow
 
@@ -187,7 +193,6 @@ Do not report repository creation or push success until the final `gh repo view`
 - V1 uses screenshots and manual input rather than Garmin or Strava OAuth.
 - V1 is a single-athlete, trusted-host application with no user authentication. Both servers bind to loopback, and browser writes require a trusted Origin, but loopback does not isolate other accounts or processes on a shared computer. Do not run it on an untrusted multi-user host.
 - File handlers enforce MIME/signature checks and 10 MiB screenshot / 25 MiB audio or restore limits after multipart parsing. An untrusted local process could still consume temporary-disk space while the web framework spools a request; this is another reason the V1 host must be trusted.
-- Load normalization, fatigue half-lives, and readiness thresholds are editable planning heuristics, not measurements or medical advice. Mileage progression bands and demand profiles remain V1 code configuration.
 - LT1, LT2, and 10K estimates depend on available evidence and may intentionally display `Not enough data`.
 - Climbing grades are ordinal labels for sorting and chart placement; distances between grades are not treated as linear physiology.
-- The coach can flag soreness and recommend conservative training changes, but it does not diagnose injury or disease.
+- Legacy engine tables and endpoints remain for migration and backup compatibility but are not part of normal navigation, session saving, reporting, or plan importing.

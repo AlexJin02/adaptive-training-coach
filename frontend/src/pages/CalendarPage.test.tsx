@@ -54,7 +54,7 @@ describe('calendar planning', () => {
 
     const emptyDays = await screen.findAllByRole('button', { name: 'Plan or rest' })
     await user.click(emptyDays[0]!)
-    await user.selectOptions(screen.getByLabelText('Session type'), 'Threshold')
+    await user.selectOptions(screen.getByLabelText('Session type'), 'QUALITY')
     const prescription = '4 × 8 min @ 4:15/km, HR <= 172, 2 min recovery'
     await user.type(screen.getByLabelText('Session structure / notes'), prescription)
     await user.click(screen.getByRole('button', { name: 'Add to plan' }))
@@ -62,7 +62,7 @@ describe('calendar planning', () => {
     await waitFor(() => expect(mock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(true))
     const post = mock.mock.calls.find(([, init]) => init?.method === 'POST')
     const payload = JSON.parse(String(post?.[1]?.body)) as Record<string, unknown>
-    expect(payload).toMatchObject({ workout_kind: 'RUNNING', session_type: 'Threshold', description: prescription })
+    expect(payload).toMatchObject({ workout_kind: 'RUNNING', session_type: 'QUALITY', description: prescription })
     expect(payload.structured_blocks).toEqual([{ phase: 'Main', description: prescription }])
   })
 })

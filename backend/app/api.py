@@ -31,6 +31,7 @@ from app.services import (
     core,
     data_portability,
     demo,
+    external_workflows,
     media,
     notes,
     planning,
@@ -39,6 +40,7 @@ from app.services import (
     settings_service,
     uploads,
 )
+from app.session_types import normalise_session_type
 
 router = APIRouter()
 DateType = date
@@ -95,12 +97,88 @@ class PlannedSessionInput(InputModel):
     structured_blocks: list[dict[str, Any]] = Field(default_factory=list)
     is_locked: bool = False
 
+    @model_validator(mode="after")
+    def validate_session_type(self) -> PlannedSessionInput:
+        if self.status == PlanStatus.REST:
+            return self
+        normalised = normalise_session_type(self.workout_kind, self.session_type)
+        if normalised is None:
+            raise ValueError("Choose a valid session type for this sport")
+        self.session_type = normalised
+        return self
+
+
+class PlannedSessionPatch(InputModel):
+    date: DateType | None = None
+    start_time: time | None = None
+    workout_kind: Sport | None = None
+    session_type: str | None = None
+    title: str | None = Field(None, max_length=200)
+    description: str | None = None
+    planned_duration_minutes: float | None = Field(None, gt=0)
+    planned_distance_km: float | None = Field(None, ge=0)
+    target_rpe: float | None = Field(None, ge=1, le=10)
+    priority: SessionPriority | None = None
+    structured_blocks: list[dict[str, Any]] | None = None
+    is_locked: bool | None = None
+    revision_reason: str = "Manual Calendar edit"
+
+
+class PlanTextInput(InputModel):
+    cadence: Literal["WEEKLY", "MONTHLY"]
+    markdown: str = Field(min_length=1, max_length=200_000)
+
+
+class MonthlyWeekTargetInput(InputModel):
+    week: int = Field(ge=1, le=6)
+    distance_km: float = Field(ge=0)
+
+
+class MonthlySessionStructureInput(InputModel):
+    session_type: str = Field(min_length=1, max_length=80)
+    sessions_per_week: float = Field(ge=0, le=14)
+
+
+class MonthlyRunningInput(InputModel):
+    phase: str = Field(default="", max_length=160)
+    monthly_objective: str = Field(default="", max_length=4000)
+    sessions_per_week: float | None = Field(None, ge=0, le=14)
+    session_structure: list[MonthlySessionStructureInput] = Field(default_factory=list)
+    weekly_distance_targets: list[MonthlyWeekTargetInput] = Field(default_factory=list)
+    quality_guidance: str = Field(default="", max_length=4000)
+    long_run_guidance: str = Field(default="", max_length=4000)
+    long_run_targets: list[MonthlyWeekTargetInput] = Field(default_factory=list)
+    key_principles: list[str] = Field(default_factory=list, max_length=30)
+    other_notes: str = Field(default="", max_length=8000)
+
+
+class MonthlyClimbingInput(InputModel):
+    phase: str = Field(default="", max_length=160)
+    sessions_per_week: float | None = Field(None, ge=0, le=14)
+    target_structure: list[MonthlySessionStructureInput] = Field(default_factory=list)
+    board_focus: str = Field(default="", max_length=4000)
+    key_principles: list[str] = Field(default_factory=list, max_length=30)
+    other_notes: str = Field(default="", max_length=8000)
+
+
+class MonthlyAuxiliaryInput(InputModel):
+    strength: str = Field(default="", max_length=4000)
+    mobility: str = Field(default="", max_length=4000)
+
+
+class MonthlyBlockEditInput(InputModel):
+    running: MonthlyRunningInput
+    climbing: MonthlyClimbingInput
+    auxiliary: MonthlyAuxiliaryInput
+    general_notes: str = Field(default="", max_length=8000)
+
 
 class CompletedSessionInput(InputModel):
     date: date
     start_time: time | None = None
     workout_kind: Sport
     session_type: str
+    title: str | None = Field(None, max_length=200)
     duration_minutes: float = Field(gt=0)
     rpe: float | None = Field(None, ge=1, le=10)
     notes: str | None = None
@@ -114,6 +192,8 @@ class CompletedSessionInput(InputModel):
     cadence: float | None = Field(None, gt=0)
     power_w: float | None = Field(None, gt=0)
     gym_or_crag: str | None = None
+    board_name: str | None = Field(None, max_length=120)
+    angle: int | None = Field(None, ge=0, le=90)
     hard_attempts: int | None = Field(None, ge=0)
     max_attempted: str | None = None
     max_sent: str | None = None
@@ -133,6 +213,13 @@ class CompletedSessionInput(InputModel):
 
     @model_validator(mode="after")
     def validate_subjective_feedback(self) -> CompletedSessionInput:
+        normalised = normalise_session_type(self.workout_kind, self.session_type)
+        if normalised is None:
+            raise ValueError("Choose a valid session type for this sport")
+        self.session_type = normalised
+        if self.workout_kind == Sport.CLIMBING and self.session_type != "BOARD":
+            self.board_name = None
+            self.angle = None
         text = (self.subjective_feedback_text or "").strip()
         if self.workout_kind != Sport.RUNNING and text:
             raise ValueError("subjective running feedback is only valid for RUNNING sessions")
@@ -387,10 +474,10 @@ def capabilities() -> dict[str, Any]:
         "text_extraction": configured,
         "transcription": configured,
         "note_processing": configured,
-        "ai_session_analysis": configured,
-        "ai_adaptation": configured,
-        "ai_weekly_review": configured,
-        "ai_planner": configured,
+        "ai_session_analysis": False,
+        "ai_adaptation": False,
+        "ai_weekly_review": False,
+        "ai_planner": False,
         "model": settings.openai_model if configured else None,
         "planner_model": settings.openai_planner_model if configured else None,
         "vision_model": settings.openai_vision_model if configured else None,
@@ -446,12 +533,33 @@ def save_planned_session(
 
 @router.patch("/planned-sessions/{session_id}")
 def patch_planned_session(
-    session_id: int, payload: dict[str, Any], db: DatabaseSession = Depends(get_db)
+    session_id: int, payload: PlannedSessionPatch, db: DatabaseSession = Depends(get_db)
 ) -> dict[str, Any]:
     try:
+        values = payload.model_dump(exclude_none=True)
+        current = application.get_planned_session(db, session_id)
+        sport = values.get("workout_kind", current.sport)
+        raw_type = values.get("session_type", current.workout_type)
+        normalised = normalise_session_type(sport, raw_type)
+        if normalised is None:
+            raise ValueError("Choose a valid session type for this sport")
+        values["session_type"] = normalised
         return serializers.planned_session(
-            application.update_planned_session(db, session_id, payload)
+            application.update_planned_session(db, session_id, values)
         )
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.delete("/planned-sessions/{session_id}")
+def cancel_planned_session(
+    session_id: int, db: DatabaseSession = Depends(get_db)
+) -> dict[str, Any]:
+    try:
+        item = application.cancel_planned_session(db, session_id)
+        return {"deleted": True, "id": item.id}
     except LookupError as exc:
         raise HTTPException(404, str(exc)) from exc
 
@@ -707,6 +815,59 @@ def today_dashboard(
 @router.get("/progress")
 def progress(range: str = "3 months", db: DatabaseSession = Depends(get_db)) -> dict[str, Any]:
     return reporting.progress_data(db, range)
+
+
+@router.get("/training-reports/weekly", response_class=PlainTextResponse)
+def training_report_weekly(week_start: date, db: DatabaseSession = Depends(get_db)) -> str:
+    return external_workflows.weekly_report(db, week_start)
+
+
+@router.get("/training-reports/monthly", response_class=PlainTextResponse)
+def training_report_monthly(month: str, db: DatabaseSession = Depends(get_db)) -> str:
+    try:
+        month_start = date.fromisoformat(f"{month}-01")
+    except ValueError as exc:
+        raise HTTPException(422, "month must use YYYY-MM") from exc
+    return external_workflows.monthly_report(db, month_start)
+
+
+@router.get("/training-plans/template/{cadence}", response_class=PlainTextResponse)
+def training_plan_template(cadence: Literal["weekly", "monthly"]) -> str:
+    return external_workflows.plan_template(cadence.upper())
+
+
+@router.post("/training-plans/parse")
+def parse_training_plan(payload: PlanTextInput) -> dict[str, Any]:
+    return external_workflows.parse_plan(payload.markdown, payload.cadence)
+
+
+@router.post("/training-plans/import", status_code=status.HTTP_201_CREATED)
+def import_training_plan(
+    payload: PlanTextInput, db: DatabaseSession = Depends(get_db)
+) -> dict[str, Any]:
+    try:
+        return external_workflows.import_plan(db, payload.markdown, payload.cadence)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.get("/training-plans/monthly/current")
+def imported_monthly_training_block(
+    db: DatabaseSession = Depends(get_db),
+) -> dict[str, Any] | None:
+    return external_workflows.current_monthly_block(db)
+
+
+@router.patch("/training-plans/monthly/{block_id}")
+def edit_imported_monthly_training_block(
+    block_id: int,
+    payload: MonthlyBlockEditInput,
+    db: DatabaseSession = Depends(get_db),
+) -> dict[str, Any]:
+    updated = external_workflows.update_monthly_block(db, block_id, payload.model_dump(mode="json"))
+    if updated is None:
+        raise HTTPException(404, "Active monthly training block not found")
+    return updated
 
 
 @router.get("/adaptations")

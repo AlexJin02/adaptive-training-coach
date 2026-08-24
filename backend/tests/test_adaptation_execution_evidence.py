@@ -327,21 +327,11 @@ def test_api_pipeline_uses_saved_structured_execution_evidence(client: TestClien
         assert completed.status_code == 201
     adaptations = client.get("/api/v1/adaptations")
     assert adaptations.status_code == 200
-    progress = next(
-        item
-        for item in adaptations.json()["items"]
-        if item["session_id"] == plan_ids[2] and item["action"] == "PROGRESS"
-    )
-    assert progress["proposed_plan"]["structured_blocks"][1]["repetitions"] == 3
-    assert "No late-session pace deterioration detected" in progress["evidence"]
-    accepted = client.post(
-        f"/api/v1/adaptations/{progress['id']}/decision", json={"decision": "ACCEPT"}
-    )
-    assert accepted.status_code == 200
+    assert adaptations.json()["items"] == []
     plans = client.get("/api/v1/planned-sessions").json()["items"]
-    progressed_plan = next(item for item in plans if item["id"] == plan_ids[2])
-    assert progressed_plan["structured_blocks"][1]["repetitions"] == 3
-    assert progressed_plan["structured_blocks"][1]["work_minutes"] == 12
+    unchanged_plan = next(item for item in plans if item["id"] == plan_ids[2])
+    assert unchanged_plan["structured_blocks"][1]["repetitions"] == 4
+    assert unchanged_plan["structured_blocks"][1]["work_minutes"] == 8
 
 
 def test_service_pipeline_uses_incomplete_reps_as_major_failure(db) -> None:  # noqa: ANN001

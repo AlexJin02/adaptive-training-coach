@@ -2,8 +2,8 @@ import { useState } from 'react'
 import { api } from '../api/client'
 import { useResource } from '../api/hooks'
 import { BarChart, GradePyramid, LineChart } from '../components/charts'
-import { Button, Card, EmptyState, ErrorPanel, InlineNotice, LoadingGrid, PageHeader, SectionHeading, Tabs } from '../components/ui'
-import { formatDate, formatPace, formatRaceTime } from '../lib/format'
+import { Button, Card, EmptyState, ErrorPanel, InlineNotice, LoadingGrid, Metric, PageHeader, SectionHeading, Tabs } from '../components/ui'
+import { formatDate, formatDuration, formatPace, formatRaceTime } from '../lib/format'
 import type { GymSet, ProgressData } from '../types'
 
 const fontGrades = ['5', '5+', '6A', '6A+', '6B', '6B+', '6C', '6C+', '7A', '7A+', '7B', '7B+', '7C', '7C+', '8A', '8A+', '8B']
@@ -23,6 +23,9 @@ export function ProgressPage(): React.JSX.Element {
 
 function RunningProgress({ data }: { data: ProgressData['running'] }): React.JSX.Element {
   return <div className="chart-grid">
+    <Card title="Running frequency"><Metric label="Runs in selected period" value={data.run_frequency} /></Card>
+    <Card title="Sessions by type"><BarChart data={data.sessions_by_type.map((item) => ({ date: item.label, value: item.value, label: item.label }))} label="Session count" /></Card>
+    <Card title="Weekly mileage"><BarChart data={data.weekly_mileage} label="7-day distance" formatValue={(value) => `${value.toFixed(1)} km`} /></Card>
     <Card title="Monthly mileage"><BarChart data={data.monthly_mileage} label="Calendar-month distance" formatValue={(value) => `${value.toFixed(1)} km`} /><p className="chart-footnote">Calendar months are not mixed with rolling windows.</p></Card>
     <Card title="Rolling volume"><LineChart data={data.rolling_volume} label="7-day mileage" secondaryLabel="28-day weekly average" formatValue={(value) => `${value.toFixed(1)} km`} /></Card>
     <Card title="Estimated 10K"><LineChart data={data.estimated_10k} label="Estimated time" formatValue={formatRaceTime} /><p className="chart-footnote">Only evidence-backed estimates are shown. A recent verified 10K overrides modelled equivalence.</p></Card>
@@ -33,6 +36,8 @@ function RunningProgress({ data }: { data: ProgressData['running'] }): React.JSX
 
 function ClimbingProgress({ data }: { data: ProgressData['climbing'] }): React.JSX.Element {
   return <div className="progress-stack">
+    <div className="metric-grid three"><Metric label="Climbing sessions" value={data.session_count} /><Metric label="Total duration" value={formatDuration(data.total_duration_minutes)} /><Metric label="Session types recorded" value={data.sessions_by_type.filter((item) => item.value > 0).length} /></div>
+    <div className="chart-grid"><Card title="Weekly climbing frequency"><BarChart data={data.weekly_sessions} label="Sessions per week" /></Card><Card title="Monthly climbing frequency"><BarChart data={data.monthly_sessions} label="Sessions per month" /></Card><Card title="Sessions by type"><BarChart data={data.sessions_by_type.map((item) => ({ date: item.label, value: item.value, label: item.label }))} label="Sessions" /></Card><Card title="Grade / colour attempts"><BarChart data={data.grade_attempts.map((item) => ({ date: item.label, value: item.value, label: item.label }))} label="Attempts" /></Card><Card title="Grade / colour sends"><BarChart data={data.grade_sends.map((item) => ({ date: item.label, value: item.value, label: item.label }))} label="Sends" /></Card></div>
     <Card title="Tension Board 2 benchmarks"><TB2AngleCharts benchmarks={data.tb2_benchmarks} />{data.tb2_benchmarks.length ? <div className="benchmark-table"><div className="table-row table-head"><span>Date</span><span>Angle</span><span>Verified</span><span>Estimated</span></div>{data.tb2_benchmarks.map((item) => <div className="table-row" key={item.id}><span>{formatDate(item.date)}{item.is_demo ? ' · DEMO' : ''}</span><span>{item.angle}°</span><strong>{item.verified_grade}</strong><span>{item.estimated_grade ?? '—'}</span></div>)}</div> : null}<InlineNotice>Board angles and grade systems are charted separately. Ordinals only place labels in order; spacing does not imply linear physiological improvement.</InlineNotice></Card>
     <section><SectionHeading title="Home-gym set comparison" description="Grade pyramids preserve the distribution instead of collapsing climbing into one score." />{data.gym_sets.length ? <GymSetComparison sets={data.gym_sets} /> : <EmptyState title="No completed gym sets" message="Set comparisons appear after a reset has preserved historical colour progress." />}</section>
   </div>
@@ -55,7 +60,18 @@ function TB2AngleCharts({ benchmarks }: { benchmarks: ProgressData['climbing']['
       if (verifiedIndex < 0) return []
       return [{ date: benchmark.date, value: verifiedIndex, secondary: estimated && scale.includes(estimated) ? scale.indexOf(estimated) : null, label: benchmark.verified_grade }]
     })
-    return <section key={label}><h3>{label}</h3>{points.length ? <LineChart data={points} label="Verified grade" secondaryLabel="Estimated grade" formatValue={(value) => scale[Math.round(value)] ?? '—'} /> : <InlineNotice tone="warning">No grades in this group match the supported chart scale; the raw benchmark remains in the table below.</InlineNotice>}</section>
+    if (!points.length) return <section key={label}><h3>{label}</h3><InlineNotice tone="warning">No grades in this group match the supported chart scale; the raw benchmark remains in the table below.</InlineNotice></section>
+    const gradeValues = points.flatMap((point) => point.secondary == null ? [point.value] : [point.value, point.secondary])
+    const lowest = Math.min(...gradeValues)
+    const highest = Math.max(...gradeValues)
+    const domain: [number, number] = lowest === highest
+      ? [Math.max(0, lowest - 1), Math.min(scale.length - 1, highest + 1)]
+      : [lowest, highest]
+    const step = Math.max(1, Math.ceil((domain[1] - domain[0]) / 5))
+    const gradeTicks = Array.from({ length: Math.floor((domain[1] - domain[0]) / step) + 1 }, (_, index) => domain[0] + index * step)
+    if (gradeTicks.at(-1) !== domain[1]) gradeTicks.push(domain[1])
+    const gradeLabel = (value: number) => scale[Math.round(value)] ?? '—'
+    return <section key={label}><h3>{label}</h3><LineChart data={points} label="Verified grade" secondaryLabel="Estimated grade" formatValue={gradeLabel} yDomain={domain} yTicks={gradeTicks} formatYAxisValue={gradeLabel} /></section>
   })}</div>
 }
 

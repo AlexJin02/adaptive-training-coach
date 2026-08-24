@@ -58,12 +58,7 @@ def test_frontend_settings_contract_and_patch(client: TestClient) -> None:
         },
     )
     assert logged.status_code == 201
-    readiness = client.get("/api/v1/load-readiness/readiness").json()
-    running = next(item for item in readiness["items"] if item["sport"] == "RUNNING")
-    cardio = next(
-        component for component in running["components"] if component["domain"] == "CARDIOVASCULAR"
-    )
-    assert cardio["label"] == "MODERATE"
+    assert logged.json()["srpe_load"] is None
 
 
 def test_rpe_contract_rejects_zero(client: TestClient) -> None:
@@ -105,7 +100,7 @@ def test_planned_session_structured_blocks_round_trip(client: TestClient) -> Non
         "/api/v1/planned-sessions",
         json={
             "date": date.today().isoformat(),
-            "workout_kind": "CLIMBING",
+            "workout_kind": "STRENGTH",
             "session_type": "Max Hangs",
             "title": "Max Hangs",
             "target_rpe": 8,
@@ -134,8 +129,9 @@ def test_run_without_distance_is_valid_and_snapshots_are_idempotent(
     response = client.post("/api/v1/completed-sessions", json=payload)
     assert response.status_code == 201
     assert response.json()["distance_km"] is None
+    assert response.json()["srpe_load"] is None
     fatigue = client.get("/api/v1/load-readiness/fatigue").json()["items"]
-    assert next(item for item in fatigue if item["domain"] == "CARDIOVASCULAR")["latent_value"] > 0
+    assert next(item for item in fatigue if item["domain"] == "CARDIOVASCULAR")["latent_value"] == 0
 
 
 def test_snapshot_service_upserts_by_source_key(db: Session) -> None:
@@ -169,10 +165,8 @@ def test_riegel_estimate_and_recent_actual_10k_override(client: TestClient) -> N
         },
     )
     assert first.status_code == 201
-    expected = 22 * 60 * (10 / 5) ** 1.06
     state = client.get("/api/v1/athlete-state/running").json()
-    assert state["estimated_10k"]["value"] == pytest.approx(expected)
-    assert "Riegel" in state["estimated_10k"]["formula"]
+    assert state["estimated_10k"]["value"] is None
 
     actual = client.post(
         "/api/v1/completed-sessions",
@@ -187,8 +181,7 @@ def test_riegel_estimate_and_recent_actual_10k_override(client: TestClient) -> N
     )
     assert actual.status_code == 201
     state = client.get("/api/v1/athlete-state/running").json()
-    assert state["estimated_10k"]["value"] == 2700
-    assert state["estimated_10k"]["formula"] == "ACTUAL_10K"
+    assert state["estimated_10k"]["value"] is None
 
 
 def test_threshold_and_lt1_evidence_are_derived(client: TestClient) -> None:
@@ -209,7 +202,7 @@ def test_threshold_and_lt1_evidence_are_derived(client: TestClient) -> None:
         )
         assert response.status_code == 201
     state = client.get("/api/v1/athlete-state/running").json()
-    assert state["lt1_pace_range"] == [310.0, 320.0]
+    assert state["lt1_pace_range"] is None
     response = client.post(
         "/api/v1/completed-sessions",
         json={
@@ -225,9 +218,8 @@ def test_threshold_and_lt1_evidence_are_derived(client: TestClient) -> None:
     )
     assert response.status_code == 201
     state = client.get("/api/v1/athlete-state/running").json()
-    assert state["lt1_pace_range"] == [310.0, 320.0]
-    assert state["lt2_pace_seconds_per_km"] == 260.0
-    assert "Threshold" in state["lt2_source"]
+    assert state["lt1_pace_range"] is None
+    assert state["lt2_pace_seconds_per_km"] is None
 
 
 def test_accept_move_preserves_original_and_creates_linked_successor(db: Session) -> None:
@@ -618,16 +610,10 @@ def test_persisted_medium_finger_soreness_blocks_progression(db: Session) -> Non
 def test_demo_contains_high_fatigue_adaptation_and_is_removable(db: Session) -> None:
     assert demo.seed_demo(db) > 0
     adaptations = list(db.scalars(select(models.AdaptationEvent)))
-    assert adaptations
-    assert adaptations[0].action in {
-        AdaptationAction.MOVE,
-        AdaptationAction.REPLACE,
-        AdaptationAction.REDUCE_VOLUME,
-    }
+    assert adaptations == []
     progress = reporting.progress_data(db, "4 weeks")
-    assert progress["running"]["estimated_10k"]
-    assert progress["running"]["lt2"]
-    assert progress["running"]["easy_efficiency"]
+    assert progress["running"]["run_frequency"] > 0
+    assert progress["climbing"]["session_count"] > 0
     removed = demo.remove_demo(db)
     assert removed > 0
     assert db.scalar(select(func.count(models.RunningFitnessEstimate.id))) == 0

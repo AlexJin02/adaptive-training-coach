@@ -23,13 +23,12 @@ function yAt(value: number, min: number, max: number): number {
   return PAD.top + ((max - value) / (max - min)) * (HEIGHT - PAD.top - PAD.bottom)
 }
 
-function Axis({ min, max, data }: { min: number; max: number; data: SeriesPoint[] }): React.JSX.Element {
-  const ticks = [0, 0.25, 0.5, 0.75, 1]
+function Axis({ min, max, data, yTicks, formatYValue = (value) => formatNumber(value, max < 20 ? 1 : 0) }: { min: number; max: number; data: SeriesPoint[]; yTicks?: number[]; formatYValue?: (value: number) => string }): React.JSX.Element {
+  const ticks = yTicks ?? [max, max - (max - min) * .25, max - (max - min) * .5, max - (max - min) * .75, min]
   return <g className="chart-axis">
-    {ticks.map((part) => {
-      const y = PAD.top + part * (HEIGHT - PAD.top - PAD.bottom)
-      const value = max - part * (max - min)
-      return <g key={part}><line x1={PAD.left} y1={y} x2={WIDTH - PAD.right} y2={y} /><text x={PAD.left - 8} y={y + 4} textAnchor="end">{formatNumber(value, max < 20 ? 1 : 0)}</text></g>
+    {ticks.map((value) => {
+      const y = yAt(value, min, max)
+      return <g key={value}><line x1={PAD.left} y1={y} x2={WIDTH - PAD.right} y2={y} /><text x={PAD.left - 8} y={y + 4} textAnchor="end">{formatYValue(value)}</text></g>
     })}
     {data.map((point, index) => {
       if (index !== 0 && index !== data.length - 1 && index % Math.ceil(data.length / 5) !== 0) return null
@@ -38,11 +37,11 @@ function Axis({ min, max, data }: { min: number; max: number; data: SeriesPoint[
   </g>
 }
 
-export function LineChart({ data, label, secondaryLabel, formatValue = (value) => formatNumber(value, 1) }: { data: SeriesPoint[]; label: string; secondaryLabel?: string; formatValue?: (value: number) => string }): React.JSX.Element {
+export function LineChart({ data, label, secondaryLabel, formatValue = (value) => formatNumber(value, 1), yDomain, yTicks, formatYAxisValue }: { data: SeriesPoint[]; label: string; secondaryLabel?: string; formatValue?: (value: number) => string; yDomain?: [number, number]; yTicks?: number[]; formatYAxisValue?: (value: number) => string }): React.JSX.Element {
   const id = useId().replaceAll(':', '')
   if (!data.length) return <ChartEmpty />
   const values = data.flatMap((point) => point.secondary == null ? [point.value] : [point.value, point.secondary])
-  const [min, max] = extent(values)
+  const [min, max] = yDomain ?? extent(values)
   const primary = data.map((point, index) => `${xAt(index, data.length)},${yAt(point.value, min, max)}`).join(' ')
   const secondaryPoints = data.filter((point) => point.secondary != null)
   const secondary = secondaryPoints.map((point) => `${xAt(data.indexOf(point), data.length)},${yAt(point.secondary ?? 0, min, max)}`).join(' ')
@@ -50,7 +49,7 @@ export function LineChart({ data, label, secondaryLabel, formatValue = (value) =
     <div className="chart-legend"><span><i className="legend-primary" />{label}</span>{secondaryLabel && <span><i className="legend-secondary" />{secondaryLabel}</span>}</div>
     <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} role="img" aria-label={`${label} over time`}>
       <defs><linearGradient id={`area-${id}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="var(--accent)" stopOpacity=".25"/><stop offset="1" stopColor="var(--accent)" stopOpacity="0"/></linearGradient></defs>
-      <Axis min={min} max={max} data={data} />
+      <Axis min={min} max={max} data={data} yTicks={yTicks} formatYValue={formatYAxisValue} />
       <polyline points={primary} className="chart-line chart-primary" />
       {secondary && <polyline points={secondary} className="chart-line chart-secondary" />}
       {data.map((point, index) => <g key={`${point.date}-${index}`} className="chart-point"><circle cx={xAt(index, data.length)} cy={yAt(point.value, min, max)} r="4"><title>{`${formatDate(point.date)} · ${label}: ${formatValue(point.value)}${point.confidence ? ` · ${point.confidence} confidence` : ''}`}</title></circle>{point.secondary != null && <circle className="secondary-point" cx={xAt(index, data.length)} cy={yAt(point.secondary, min, max)} r="3"><title>{`${formatDate(point.date)} · ${secondaryLabel}: ${formatValue(point.secondary)}`}</title></circle>}</g>)}

@@ -7,7 +7,14 @@ export function localIsoDate(date = new Date()): string {
 
 export function formatDate(value: string, options?: Intl.DateTimeFormatOptions): string {
   const [year = 0, month = 1, day = 1] = value.slice(0, 10).split('-').map(Number)
-  return new Intl.DateTimeFormat(undefined, options ?? { weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(year, month - 1, day))
+  const parsed = new Date(year, month - 1, day)
+  const isCalendarDate = /^\d{4}-\d{2}-\d{2}/.test(value)
+    && Number.isFinite(parsed.valueOf())
+    && parsed.getFullYear() === year
+    && parsed.getMonth() === month - 1
+    && parsed.getDate() === day
+  if (!isCalendarDate) return value || '—'
+  return new Intl.DateTimeFormat(undefined, options ?? { weekday: 'short', day: 'numeric', month: 'short' }).format(parsed)
 }
 
 export function formatLongDate(value: string): string {

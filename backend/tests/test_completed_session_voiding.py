@@ -1,16 +1,11 @@
 from datetime import date
 
-import pytest
 from fastapi.testclient import TestClient
 
 
-def test_delete_completed_session_permanently_removes_and_recalculates_evidence(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
+def test_delete_completed_session_permanently_removes_factual_evidence(
+    client: TestClient,
 ) -> None:
-    monkeypatch.setattr(
-        "app.services.application.core.analyse_completed_session_with_ai",
-        lambda *_args, **_kwargs: None,
-    )
     plan_response = client.post(
         "/api/v1/planned-sessions",
         json={
@@ -40,7 +35,7 @@ def test_delete_completed_session_permanently_removes_and_recalculates_evidence(
     )
     assert saved.status_code == 201
     session_id = saved.json()["id"]
-    assert client.get("/api/v1/athlete-state/running").json()["estimated_10k"]["value"]
+    assert client.get("/api/v1/athlete-state/running").json()["estimated_10k"]["value"] is None
 
     deleted = client.delete(f"/api/v1/completed-sessions/{session_id}")
     assert deleted.status_code == 200

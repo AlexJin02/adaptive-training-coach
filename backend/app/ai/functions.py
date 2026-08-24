@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.config import Settings, get_settings
 from app.enums import AdaptationAction, Confidence, NoteCategory, SessionPriority, Sport
+from app.session_types import normalise_session_type
 
 
 class AIUnavailableError(RuntimeError):
@@ -31,6 +32,7 @@ class ExtractedValue(BaseModel):
 class WorkoutExtraction(BaseModel):
     workout_kind: ExtractedValue
     session_type: ExtractedValue
+    title: ExtractedValue
     activity_type: ExtractedValue
     date: ExtractedValue
     distance_km: ExtractedValue
@@ -41,6 +43,8 @@ class WorkoutExtraction(BaseModel):
     elevation_m: ExtractedValue
     cadence: ExtractedValue
     power_w: ExtractedValue
+    board_name: ExtractedValue
+    angle: ExtractedValue
     rpe: ExtractedValue
     splits: ExtractedValue
     intervals: ExtractedValue
@@ -131,6 +135,14 @@ def normalise_workout_extraction(
                 _mark_invalid(field, name)
             else:
                 field.value = round(float(field.value))
+    if extraction.workout_kind.value in {Sport.RUNNING.value, Sport.CLIMBING.value}:
+        normalised = normalise_session_type(
+            Sport(extraction.workout_kind.value), extraction.session_type.value
+        )
+        if normalised is None:
+            _mark_invalid(extraction.session_type, "session type")
+        else:
+            extraction.session_type.value = normalised
     return extraction
 
 
@@ -318,6 +330,7 @@ class MonthlyReviewPlanOutput(StrictAIOutput):
 WORKOUT_FIELDS = (
     "workout_kind",
     "session_type",
+    "title",
     "activity_type",
     "date",
     "distance_km",
@@ -328,6 +341,8 @@ WORKOUT_FIELDS = (
     "elevation_m",
     "cadence",
     "power_w",
+    "board_name",
+    "angle",
     "rpe",
     "splits",
     "intervals",
@@ -407,6 +422,7 @@ def _workout_schema() -> dict[str, Any]:
         "cadence",
         "power_w",
         "rpe",
+        "angle",
     ):
         value_schemas[name] = numeric
     for name in ("splits", "intervals"):
@@ -424,6 +440,22 @@ def _workout_schema() -> dict[str, Any]:
             "STRENGTH",
             "CROSSFIT_CONDITIONING",
             "MOBILITY_RECOVERY",
+            None,
+        ],
+    }
+    value_schemas["session_type"] = {
+        "type": ["string", "null"],
+        "enum": [
+            "EASY",
+            "LONG_RUN",
+            "QUALITY",
+            "RACE",
+            "BOULDERING",
+            "SPORT_CLIMBING",
+            "BOARD",
+            "Strength",
+            "CrossFit / Conditioning",
+            "Mobility / Recovery",
             None,
         ],
     }
@@ -461,7 +493,11 @@ def extract_workout_from_text(
             "relative dates such as today or yesterday. Return date as YYYY-MM-DD, duration_minutes "
             "as total minutes, average_pace as M:SS per km, heart rates as whole bpm, and RPE as a "
             "number from 1 to 10. Do not infer physiology or fabricate measurements. The output is "
-            "a preview, never a save."
+            "a preview, never a save. Running session_type must be EASY, LONG_RUN, QUALITY, or "
+            "RACE; climbing session_type must be BOULDERING, SPORT_CLIMBING, or BOARD. If the "
+            "type is uncertain, return null."
+            " Preserve a factual workout title when explicitly present. For BOARD climbing, also "
+            "extract board_name and angle when stated."
         ),
         user_content=[{"type": "input_text", "text": text}],
         schema_name="workout_extraction",
@@ -481,6 +517,9 @@ def extract_workout_from_image(image: bytes, media_type: str) -> WorkoutExtracti
             "Extract only values visibly present in this Garmin, Strava, or training screenshot. "
             "Return null for unseen or unreadable values. Every source must name visible evidence. "
             "This is a correctable preview and must not claim it was saved."
+            " Running session_type must be EASY, LONG_RUN, QUALITY, or RACE; climbing must be "
+            "BOULDERING, SPORT_CLIMBING, or BOARD. Return null when uncertain."
+            " Preserve a visible workout title and BOARD name/angle when present."
         ),
         user_content=[
             {"type": "input_text", "text": "Extract the workout."},

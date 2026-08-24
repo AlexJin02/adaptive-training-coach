@@ -29,20 +29,20 @@ function signedNumber(value: number): string {
 }
 
 const statusTone: Record<string, 'good' | 'moderate' | 'low' | 'neutral'> = {
-  COMPLETED: 'good', MODIFIED: 'moderate', SKIPPED: 'low', REPLACED: 'moderate', MOVED: 'moderate', PLANNED: 'neutral', REST: 'neutral',
+  COMPLETED: 'good', MODIFIED: 'moderate', SKIPPED: 'low', REPLACED: 'moderate', MOVED: 'moderate', PLANNED: 'neutral', REST: 'neutral', CANCELLED: 'low',
 }
 
-export function SessionCard({ entry, compact = false, onComplete, onSkip }: { entry: CalendarEntry; compact?: boolean; onComplete?: (plannedSessionId: string | number) => void; onSkip?: (plannedSessionId: string | number) => void }): React.JSX.Element {
+export function SessionCard({ entry, compact = false, onComplete, onSkip, onOpen }: { entry: CalendarEntry; compact?: boolean; onComplete?: (plannedSessionId: string | number) => void; onSkip?: (plannedSessionId: string | number) => void; onOpen?: (entry: CalendarEntry) => void }): React.JSX.Element {
   const session = entry.completed ?? entry.planned
   if (!session) return <div className="session-card session-rest"><span className="session-time">—</span><div><strong>Rest</strong><p>Recovery day</p></div><Pill>REST</Pill></div>
   const isCompleted = Boolean(entry.completed)
   const duration = entry.completed?.duration_minutes ?? entry.planned?.planned_duration_minutes
   const distance = entry.completed?.distance_km ?? entry.planned?.planned_distance_km
-  return <article className={`session-card ${isCompleted ? 'is-completed' : ''} ${compact ? 'compact' : ''}`}>
+  return <article className={`session-card ${isCompleted ? 'is-completed' : ''} ${compact ? 'compact' : ''} ${onOpen ? 'is-clickable' : ''}`} onClick={() => onOpen?.(entry)}>
     <span className="session-time">{session.start_time?.slice(0, 5) ?? 'Any time'}</span>
     <div className={`session-sport sport-${session.workout_kind.toLowerCase()}`}><Icon name={session.workout_kind === 'RUNNING' ? 'run' : session.workout_kind === 'CLIMBING' ? 'climb' : 'workouts'} size={18} /></div>
     <div className="session-copy"><strong>{'title' in session && session.title ? session.title : formatEnum(session.session_type)}</strong><p>{formatEnum(session.workout_kind)}{duration ? ` · ${formatDuration(duration)}` : ''}{distance ? ` · ${formatNumber(distance, 1)} km` : ''}</p>{entry.planned && entry.completed && !compact && <small>Planned: {entry.planned.title} · Actual: {entry.completed.title ?? formatEnum(entry.completed.session_type)}</small>}</div>
-    <div className="session-actions">{session.is_demo && <Pill tone="moderate">DEMO</Pill>}{entry.planned?.is_locked && <Pill tone="info">LOCKED</Pill>}<Pill tone={statusTone[entry.status] ?? 'neutral'}>{entry.status}</Pill>{entry.planned && !entry.completed && entry.status !== 'REST' && onComplete && <Button variant="ghost" icon="check" onClick={() => onComplete(entry.planned!.id)}>Complete</Button>}{entry.planned && !entry.completed && ['PLANNED', 'MODIFIED'].includes(entry.status) && onSkip && <Button variant="ghost" icon="close" onClick={() => onSkip(entry.planned!.id)}>Skip</Button>}</div>
+    <div className="session-actions">{session.is_demo && <Pill tone="moderate">DEMO</Pill>}{entry.planned?.is_locked && <Pill tone="info">LOCKED</Pill>}<Pill tone={statusTone[entry.status] ?? 'neutral'}>{entry.status}</Pill>{entry.planned && !entry.completed && entry.status !== 'REST' && onComplete && <Button variant="ghost" icon="check" onClick={(event) => { event.stopPropagation(); onComplete(entry.planned!.id) }}>Complete</Button>}{entry.planned && !entry.completed && ['PLANNED', 'MODIFIED'].includes(entry.status) && onSkip && <Button variant="ghost" icon="close" onClick={(event) => { event.stopPropagation(); onSkip(entry.planned!.id) }}>Skip</Button>}</div>
   </article>
 }
 
