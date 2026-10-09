@@ -362,6 +362,7 @@ export interface GymSet {
   start_date: string
   end_date?: string | null
   notes?: string | null
+  is_active?: boolean
   progress: GymColourProgress[]
   is_demo?: boolean
 }

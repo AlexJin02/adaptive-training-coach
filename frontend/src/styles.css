@@ -460,7 +460,14 @@ input:disabled, select:disabled { color: var(--text-muted); background: var(--su
 .benchmark-table { margin: 10px 0 16px; border-top: 1px solid var(--border); }
 .table-row { display: grid; grid-template-columns: 1.5fr repeat(3, 1fr); padding: 9px 5px; border-bottom: 1px solid var(--border); color: var(--text-soft); font-size: .68rem; }
 .table-head { color: var(--text-muted); font-size: .59rem; font-weight: 800; text-transform: uppercase; }
-.gym-comparison-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.gym-comparison-grid { display: grid; grid-template-columns: 1fr; gap: 14px; }
+.gym-set-comparison-content { display: grid; grid-template-columns: minmax(0, 1fr) minmax(190px, .38fr); gap: 20px; align-items: start; }
+.gym-set-highlights { display: grid; gap: 9px; padding: 12px; border-left: 1px solid var(--border); }
+.gym-set-highlight { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elevated); }
+.gym-set-highlight > span { grid-column: 1 / -1; color: var(--text-muted); font-size: .57rem; font-weight: 800; text-transform: uppercase; }
+.gym-set-highlight strong { display: flex; align-items: center; gap: 7px; font-size: .75rem; }
+.gym-set-highlight strong i { width: 9px; height: 9px; border-radius: 50%; }
+.gym-set-highlight b { color: var(--text-soft); font-size: .7rem; font-variant-numeric: tabular-nums; }
 .tb2-angle-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-bottom: 14px; }
 .tb2-angle-grid > section { min-width: 0; padding: 13px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elevated); }
 .tb2-angle-grid h3 { margin-bottom: 10px; color: var(--text-soft); font-size: .68rem; letter-spacing: .04em; }
@@ -562,6 +569,7 @@ input:disabled, select:disabled { color: var(--text-muted); background: var(--su
 .subform-header span { color: var(--text-muted); font-size: .63rem; }
 .inline-editor { display: grid; grid-template-columns: 120px 1fr 42px; gap: 8px; margin-top: 8px; }
 .inline-editor.four { grid-template-columns: repeat(3, minmax(0, 1fr)) 42px; }
+.inline-editor.split-editor { grid-template-columns: repeat(4, minmax(0, 1fr)) 42px; }
 .inline-editor input, .inline-editor select, .strength-row input, .strength-row select { width: 100%; height: 38px; padding: 0 9px; }
 .problem-editor { margin-top: 10px; padding: 10px; border: 1px solid var(--border); border-radius: 7px; }
 .problem-editor .inline-editor { grid-template-columns: 1.4fr .7fr .6fr .8fr; }
@@ -570,6 +578,7 @@ input:disabled, select:disabled { color: var(--text-muted); background: var(--su
 .tag-picker button.selected { color: var(--climb); border-color: color-mix(in srgb, var(--climb), transparent 55%); background: var(--climb-soft); }
 .strength-row { display: grid; grid-template-columns: 2fr repeat(5, minmax(55px, .6fr)); gap: 7px; margin-top: 8px; }
 .import-flow, .capture-panel, .voice-panel, .degraded-flow, .preview-flow { display: flex; flex-direction: column; gap: 16px; }
+.workout-save-bar { display: flex; flex-direction: column; gap: 10px; }
 .degraded-flow { align-items: flex-start; padding: 22px 0; }
 .drop-zone { position: relative; min-height: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; text-align: center; border: 1px dashed var(--border-strong); border-radius: 10px; background: var(--bg-elevated); cursor: pointer; }
 .drop-zone:hover { border-color: var(--accent); }
@@ -711,6 +720,9 @@ input:disabled, select:disabled { color: var(--text-muted); background: var(--su
 }
 
 @media (max-width: 820px) {
+  .gym-set-comparison-content { grid-template-columns: 1fr; }
+  .gym-set-highlights { grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 1px solid var(--border); border-left: 0; }
+  .gym-set-highlights > .eyebrow { grid-column: 1 / -1; }
   .today-plan-result-grid { grid-template-columns: 1fr; }
   .filter-bar.workout-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .workout-filters .search-field { grid-column: 1 / -1; }
@@ -828,14 +840,17 @@ input:disabled, select:disabled { color: var(--text-muted); background: var(--su
   .workout-row span::before { content: attr(data-label); display: block; margin-bottom: 4px; color: var(--text-muted); font-size: .55rem; font-weight: 800; text-transform: uppercase; }
   .workout-row span:nth-child(3) { grid-column: 1 / -1; grid-row: 1; }
   .workout-row span:last-child { display: none; }
-  .inline-editor, .inline-editor.four, .problem-editor .inline-editor, .strength-row { grid-template-columns: 1fr 1fr; }
+  .inline-editor, .inline-editor.four, .inline-editor.split-editor, .problem-editor .inline-editor, .strength-row { grid-template-columns: 1fr 1fr; }
   .extraction-row { grid-template-columns: 1fr 1.5fr; }
   .extraction-row > :nth-child(3), .extraction-row > :nth-child(4) { font-size: .56rem; }
   .extraction-row.head { display: none; }
-  .modal-backdrop { align-items: end; padding: 0; }
-  .modal { width: 100%; max-height: calc(100vh - 15px); border-radius: 13px 13px 0 0; }
+  .modal-backdrop { align-items: end; height: 100dvh; min-height: -webkit-fill-available; padding: 0; }
+  .modal { width: 100%; max-height: calc(100dvh - max(10px, env(safe-area-inset-top))); border-radius: 13px 13px 0 0; }
   .modal-body { padding: 16px; }
-  .modal .form-actions { position: sticky; bottom: -16px; margin: 0 -16px -16px; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); border-top: 1px solid var(--border); background: var(--surface); }
+  .modal .form-actions { position: sticky; bottom: 0; z-index: 4; margin: 0 -16px; padding: 12px 16px calc(16px + env(safe-area-inset-bottom)); border-top: 1px solid var(--border); background: color-mix(in srgb, var(--surface), transparent 3%); box-shadow: 0 -10px 24px rgba(0, 0, 0, .18); backdrop-filter: blur(16px); }
+  .preview-flow > .workout-save-bar { order: -1; position: sticky; top: -16px; z-index: 6; margin: 0 -16px; padding: 11px 16px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--surface), transparent 3%); box-shadow: 0 10px 24px rgba(0, 0, 0, .14); backdrop-filter: blur(16px); }
+  .preview-flow > .workout-save-bar .form-actions { position: static; margin: 0; padding: 0; border: 0; box-shadow: none; background: transparent; backdrop-filter: none; }
+  .preview-flow > .workout-save-bar .button:last-child { flex: 1; }
   .review-controls { width: 100%; align-items: stretch; flex-direction: column; }
   .review-document > header { flex-direction: column; gap: 12px; }
   .capability-grid { grid-template-columns: 1fr; }

@@ -106,7 +106,10 @@ rolling 7-day volume, rolling 28-day weekly average, and comparable easy-running
 separate pace/heart-rate labels. Race predictions and LT2 proxy charts are intentionally omitted.
 Climbing views include verified
 TB2 grade labels and home-gym set pyramids with absolute sends and completion percentage when
-denominators are known. Filters are 4 weeks, 3 months, 6 months, and 1 year.
+denominators are known. The current home-gym set can be updated from this section, while `New Set`
+closes the current batch and preserves it in the comparison history. Each set also identifies the
+highest and second-highest colour with at least one recorded send and shows their send counts.
+Filters are 4 weeks, 3 months, 6 months, and 1 year.
 
 Environmental or workout-condition mismatch is disclosed when an efficiency comparison is weak.
 

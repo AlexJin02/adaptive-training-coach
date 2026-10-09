@@ -20,7 +20,12 @@ class Settings(BaseSettings):
     api_prefix: str = "/api/v1"
     database_url: str = f"sqlite:///{DEFAULT_DB_PATH}"
     cors_origins: list[str] = Field(
-        default_factory=lambda: ["http://localhost:5173", "http://127.0.0.1:5173"]
+        default_factory=lambda: [
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "http://localhost:8000",
+            "http://127.0.0.1:8000",
+        ]
     )
     athlete_timezone: str = "Europe/London"
     openai_api_key: str | None = None

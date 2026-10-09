@@ -353,6 +353,144 @@ def create_completed_session(
     return get_completed_session(db, item.id)
 
 
+def _replace_completed_session_details(
+    db: Session,
+    item: models.CompletedSession,
+    sport: Sport,
+    values: dict[str, Any],
+) -> None:
+    for detail in (item.running, item.climbing, item.strength):
+        if detail is not None:
+            db.delete(detail)
+    item.running = None
+    item.climbing = None
+    item.strength = None
+    db.flush()
+
+    duration = float(values["duration_minutes"])
+    if sport == Sport.RUNNING:
+        distance = values.get("distance_km")
+        pace_seconds = _parse_pace_seconds(
+            values.get("average_pace_seconds_per_km") or values.get("average_pace")
+        )
+        if pace_seconds is None and distance is not None and float(distance) > 0:
+            pace_seconds = duration * 60.0 / float(distance)
+        item.running = models.RunningSessionDetail(
+            distance_km=float(distance) if distance is not None else None,
+            average_pace_seconds_per_km=pace_seconds,
+            average_hr=values.get("average_hr"),
+            maximum_hr=values.get("max_hr"),
+            elevation_m=values.get("elevation_m"),
+            cadence=values.get("cadence"),
+            power_watts=values.get("power_w"),
+            splits=values.get("splits") or [],
+            intervals=values.get("interval_blocks") or [],
+        )
+    elif sport == Sport.CLIMBING:
+        climbing = models.ClimbingSessionDetail(
+            gym_or_crag=values.get("gym_or_crag"),
+            board_name=values.get("board_name"),
+            angle_degrees=values.get("angle"),
+            hard_attempts=values.get("hard_attempts"),
+            maximum_attempted=values.get("max_attempted"),
+            maximum_sent=values.get("max_sent"),
+            grade_scale=values.get("grade_scale"),
+        )
+        for attempt in values.get("climbing_attempts") or []:
+            outcome = str(attempt.get("outcome", "")).lower()
+            sent = bool(attempt.get("sent") or outcome in {"send", "sent", "flash"})
+            climbing.attempts.append(
+                models.ClimbingAttempt(
+                    problem=attempt.get("problem"),
+                    grade=attempt.get("grade"),
+                    attempts=int(attempt.get("attempts") or 1),
+                    sent=sent,
+                    send_count=int(
+                        attempt.get("send_count") if attempt.get("send_count") is not None else sent
+                    ),
+                    flash=bool(attempt.get("flash") or outcome == "flash"),
+                    repeat=bool(attempt.get("repeat") or outcome == "repeat"),
+                    project=bool(attempt.get("project") or outcome == "project"),
+                    style_tags=attempt.get("styles") or attempt.get("style_tags") or [],
+                )
+            )
+        item.climbing = climbing
+    elif sport in {Sport.STRENGTH, Sport.CROSSFIT_CONDITIONING}:
+        strength = models.StrengthSessionDetail(
+            workout_name=values.get("workout_name"),
+            rounds=values.get("rounds"),
+            result_time_seconds=values.get("result_time_seconds"),
+        )
+        for row in values.get("strength_sets") or []:
+            strength.sets.append(
+                models.StrengthSet(
+                    exercise=row.get("exercise") or "custom exercise",
+                    set_count=row.get("sets") or row.get("set_count"),
+                    reps=row.get("reps"),
+                    load_kg=row.get("load") or row.get("load_kg"),
+                    rpe=row.get("rpe"),
+                    rir=row.get("rir"),
+                    tags=row.get("tags") or [],
+                )
+            )
+        item.strength = strength
+
+
+def update_completed_session(
+    db: Session, session_id: int, values: dict[str, Any]
+) -> models.CompletedSession:
+    item = get_completed_session(db, session_id)
+    previous_planned_id = item.planned_session_id
+    planned_id = int(values["planned_session_id"]) if values.get("planned_session_id") else None
+    sport = Sport(values["workout_kind"])
+    feedback_text = values.get("subjective_feedback_text")
+    feedback_changed = feedback_text != item.subjective_feedback_text
+
+    item.planned_session_id = planned_id
+    item.session_date = values["date"]
+    item.start_time = values.get("start_time")
+    item.duration_minutes = float(values["duration_minutes"])
+    item.sport = sport
+    item.workout_type = values["session_type"]
+    item.title = values.get("title") or values["session_type"]
+    item.rpe = float(values["rpe"]) if values.get("rpe") is not None else None
+    item.notes = values.get("notes") or ""
+    item.subjective_feedback_text = feedback_text
+    item.subjective_feedback_source = values.get("subjective_feedback_source") or "NONE"
+    if feedback_changed:
+        item.subjective_feedback_created_at = datetime.now(UTC) if feedback_text else None
+
+    # Any old heuristic/AI result described the pre-edit evidence and must not survive a correction.
+    item.srpe_load = None
+    item.base_stress = None
+    item.ai_analysis = None
+    item.domain_stresses.clear()
+    _replace_completed_session_details(db, item, sport, values)
+
+    if previous_planned_id and previous_planned_id != planned_id:
+        previous_plan = db.get(models.PlannedSession, previous_planned_id)
+        another_completed = db.scalar(
+            select(models.CompletedSession.id).where(
+                models.CompletedSession.planned_session_id == previous_planned_id,
+                models.CompletedSession.id != item.id,
+            )
+        )
+        if previous_plan and not another_completed and previous_plan.status == PlanStatus.COMPLETED:
+            previous_plan.status = PlanStatus.PLANNED
+    if planned_id:
+        planned = db.get(models.PlannedSession, planned_id)
+        if planned is None:
+            raise ValueError("Linked planned session not found")
+        planned.status = PlanStatus.COMPLETED
+
+    for snapshot_model in (models.FatigueSnapshot, models.ReadinessSnapshot):
+        db.query(snapshot_model).filter(snapshot_model.source_key == f"session:{item.id}").delete(
+            synchronize_session=False
+        )
+    db.commit()
+    return get_completed_session(db, item.id)
+
+
 def get_completed_session(db: Session, session_id: int) -> models.CompletedSession:
     query = (
         select(models.CompletedSession)

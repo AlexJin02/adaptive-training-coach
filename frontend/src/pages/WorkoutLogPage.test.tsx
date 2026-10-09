@@ -18,6 +18,7 @@ describe('workout import degradation', () => {
     expect(screen.getByText(/No OpenAI API key/i)).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Use manual workout form' }))
     expect(screen.getByLabelText(/^Duration/)).toHaveValue('45:00')
+    expect(screen.getByLabelText(/^Duration/)).toHaveAttribute('inputmode', 'text')
     expect(screen.getByLabelText(/RPE \(1–10\)/)).toHaveValue(3)
   })
 
@@ -113,6 +114,29 @@ describe('workout import degradation', () => {
     expect(screen.getByRole('button', { name: 'Complete Review' })).toBeInTheDocument()
   })
 
+  it('shows every Strava sync API error as a warning', async () => {
+    const mock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/capabilities')) {
+        return new Response(JSON.stringify({ ...capabilitiesOff, strava_sync_configured: true }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      if (url.includes('/integrations/strava/sync')) {
+        return new Response(JSON.stringify({ detail: 'Origin is not allowed to modify local training data' }), { status: 403, headers: { 'Content-Type': 'application/json' } })
+      }
+      return new Response(JSON.stringify({ items: [], total: 0 }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    })
+    vi.stubGlobal('fetch', mock)
+    const user = userEvent.setup()
+    render(<MemoryRouter><CapabilityProvider><WorkoutLogPage /></CapabilityProvider></MemoryRouter>)
+
+    const sync = await screen.findByRole('button', { name: 'Sync Strava' })
+    await waitFor(() => expect(sync).toBeEnabled())
+    await user.click(sync)
+
+    const notice = await screen.findByText('Origin is not allowed to modify local training data')
+    expect(notice.closest('.inline-notice')).toHaveClass('notice-warning')
+  })
+
   it('maps bouldering imports explicitly and preserves reviewed RPE and split detail', async () => {
     const extraction: WorkoutExtraction = {
       workout_kind: extracted(null),
@@ -151,8 +175,11 @@ describe('workout import degradation', () => {
     expect(await screen.findByText('Review every field')).toBeInTheDocument()
     expect(screen.getByLabelText('RPE (1–10)')).toHaveValue(8)
     expect(screen.getByLabelText(/^Duration/)).toHaveValue('2:00:00')
+    expect(screen.getByLabelText(/^Duration/)).toHaveAttribute('inputmode', 'text')
     expect(screen.getByLabelText('Date')).toHaveAttribute('type', 'date')
-    await user.click(screen.getByRole('button', { name: 'Save workout' }))
+    const saveWorkout = screen.getByRole('button', { name: 'Save workout' })
+    expect(saveWorkout.closest('.workout-save-bar')).not.toBeNull()
+    await user.click(saveWorkout)
     const post = mock.mock.calls.find(([input, init]) => String(input).includes('/completed-sessions') && init?.method === 'POST')
     expect(post).toBeDefined()
     const payload = JSON.parse(String(post?.[1]?.body)) as Record<string, unknown>
@@ -257,6 +284,41 @@ describe('workout import degradation', () => {
     expect(screen.getByText(/cannot be undone/i)).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Delete permanently' }))
     await waitFor(() => expect(mock.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(true))
+  })
+
+  it('edits a completed workout and its lap evidence', async () => {
+    const session = {
+      id: 18, date: '2026-08-23', start_time: '07:30', workout_kind: 'RUNNING', session_type: 'EASY', title: 'Morning Run', duration_minutes: 45, distance_km: 8, rpe: 4,
+      average_pace_seconds_per_km: 330, average_hr: 150, cadence: 176,
+      splits: [{ lap_index: 1, distance_km: 1, elapsed_time_seconds: 330, average_hr: 148, cadence: 174 }],
+      interval_blocks: [], climbing_attempts: [], strength_sets: [], subjective_feedback_source: 'NONE',
+    }
+    const mock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      const body = url.includes('/capabilities') ? capabilitiesOff
+        : url.includes('/completed-sessions/18') && init?.method === 'PATCH' ? { ...session, title: 'Corrected Run' }
+          : url.includes('/integrations/strava/runs/inbox') || url.includes('/planned-sessions') ? { items: [], total: 0 }
+            : { items: [session], total: 1 }
+      return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    })
+    vi.stubGlobal('fetch', mock)
+    const user = userEvent.setup()
+    render(<MemoryRouter><CapabilityProvider><WorkoutLogPage /></CapabilityProvider></MemoryRouter>)
+
+    await user.click(await screen.findByRole('button', { name: 'View Morning Run' }))
+    await user.click(screen.getByRole('button', { name: 'Edit workout' }))
+    expect(screen.getByLabelText('Title')).toHaveValue('Morning Run')
+    expect(screen.getByLabelText(/^Duration/)).toHaveValue('45:00')
+    expect(screen.getByLabelText('Split 1 cadence')).toHaveValue('174')
+    await user.clear(screen.getByLabelText('Title'))
+    await user.type(screen.getByLabelText('Title'), 'Corrected Run')
+    await user.clear(screen.getByLabelText('Split 1 HR'))
+    await user.type(screen.getByLabelText('Split 1 HR'), '152')
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+
+    await waitFor(() => expect(mock.mock.calls.some(([input, init]) => String(input).includes('/completed-sessions/18') && init?.method === 'PATCH')).toBe(true))
+    const patchCall = mock.mock.calls.find(([input, init]) => String(input).includes('/completed-sessions/18') && init?.method === 'PATCH')
+    expect(JSON.parse(String(patchCall?.[1]?.body))).toMatchObject({ title: 'Corrected Run', duration_minutes: 45, splits: [{ lap_index: 1, distance_km: 1, elapsed_time_seconds: 330, average_hr: 152, cadence: 174 }] })
   })
 })
 

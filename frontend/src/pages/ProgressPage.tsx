@@ -2,9 +2,10 @@ import { useState } from 'react'
 import { api } from '../api/client'
 import { useResource } from '../api/hooks'
 import { BarChart, GradePyramid, LineChart } from '../components/charts'
-import { Button, Card, EmptyState, ErrorPanel, InlineNotice, LoadingGrid, Metric, PageHeader, SectionHeading, Tabs } from '../components/ui'
+import { Button, Card, EmptyState, ErrorPanel, InlineNotice, LoadingGrid, Metric, Modal, PageHeader, SectionHeading, Tabs } from '../components/ui'
 import { formatDate, formatDuration, formatPace } from '../lib/format'
 import type { GymSet, ProgressData } from '../types'
+import { GymProgressForm, NewGymSetForm } from './AthleteStatePage'
 
 const fontGrades = ['5', '5+', '6A', '6A+', '6B', '6B+', '6C', '6C+', '7A', '7A+', '7B', '7B+', '7C', '7C+', '8A', '8A+', '8B']
 const vGrades = ['V0', 'V1', 'V2', 'V3', 'V4', 'V5', 'V6', 'V7', 'V8', 'V9', 'V10', 'V11', 'V12']
@@ -14,10 +15,11 @@ export function ProgressPage(): React.JSX.Element {
   const [sport, setSport] = useState<'running' | 'climbing'>('running')
   const [range, setRange] = useState<'4w' | '3m' | '6m' | '1y'>('3m')
   const resource = useResource(() => api.progress(range), [range])
+  const settings = useResource(api.settings, [])
   return <div className="page progress-page">
     <PageHeader eyebrow="LONGITUDINAL ANALYSIS" title="Progress" description="Retrospective trends only. This page never changes upcoming training." actions={<div className="range-picker" aria-label="Time range">{(['4w', '3m', '6m', '1y'] as const).map((item) => <Button key={item} variant={range === item ? 'primary' : 'ghost'} onClick={() => setRange(item)}>{item === '4w' ? '4 weeks' : item === '3m' ? '3 months' : item === '6m' ? '6 months' : '1 year'}</Button>)}</div>} />
     <Tabs label="Progress sport" value={sport} onChange={setSport} items={[{ value: 'running', label: 'Running' }, { value: 'climbing', label: 'Climbing' }]} />
-    {resource.loading ? <LoadingGrid count={4} /> : resource.error ? <ErrorPanel message={resource.error.message} onRetry={resource.reload} /> : resource.data ? sport === 'running' ? <RunningProgress data={resource.data.running} /> : <ClimbingProgress data={resource.data.climbing} /> : <EmptyState title="No progress data" message="Verified sessions and benchmarks will appear here." />}
+    {resource.loading ? <LoadingGrid count={4} /> : resource.error ? <ErrorPanel message={resource.error.message} onRetry={resource.reload} /> : resource.data ? sport === 'running' ? <RunningProgress data={resource.data.running} /> : <ClimbingProgress data={resource.data.climbing} defaultGym={settings.data?.gym_name ?? 'Home Gym'} onReload={resource.reload} /> : <EmptyState title="No progress data" message="Verified sessions and benchmarks will appear here." />}
   </div>
 }
 
@@ -43,12 +45,17 @@ function EasyRunningEfficiency({ data, band, warning }: { data: ProgressData['ru
   </Card>
 }
 
-function ClimbingProgress({ data }: { data: ProgressData['climbing'] }): React.JSX.Element {
+function ClimbingProgress({ data, defaultGym, onReload }: { data: ProgressData['climbing']; defaultGym: string; onReload: () => void }): React.JSX.Element {
+  const [newSetOpen, setNewSetOpen] = useState(false)
+  const [progressOpen, setProgressOpen] = useState(false)
+  const activeSet = [...data.gym_sets].reverse().find((set) => set.is_active === true || !set.end_date) ?? null
   return <div className="progress-stack">
     <div className="metric-grid three"><Metric label="Climbing sessions" value={data.session_count} /><Metric label="Total duration" value={formatDuration(data.total_duration_minutes)} /><Metric label="Session types recorded" value={data.sessions_by_type.filter((item) => item.value > 0).length} /></div>
     <div className="chart-grid"><Card title="Weekly climbing frequency"><BarChart data={data.weekly_sessions} label="Sessions per week" /></Card><Card title="Monthly climbing frequency"><BarChart data={data.monthly_sessions} label="Sessions per month" /></Card><Card title="Sessions by type"><BarChart data={data.sessions_by_type.map((item) => ({ date: item.label, value: item.value, label: item.label }))} label="Sessions" /></Card><Card title="Grade / colour attempts"><BarChart data={data.grade_attempts.map((item) => ({ date: item.label, value: item.value, label: item.label }))} label="Attempts" /></Card><Card title="Grade / colour sends"><BarChart data={data.grade_sends.map((item) => ({ date: item.label, value: item.value, label: item.label }))} label="Sends" /></Card></div>
     <Card title="Tension Board 2 benchmarks"><TB2AngleCharts benchmarks={data.tb2_benchmarks} />{data.tb2_benchmarks.length ? <div className="benchmark-table"><div className="table-row table-head"><span>Date</span><span>Angle</span><span>Verified</span><span>Estimated</span></div>{data.tb2_benchmarks.map((item) => <div className="table-row" key={item.id}><span>{formatDate(item.date)}{item.is_demo ? ' · DEMO' : ''}</span><span>{item.angle}°</span><strong>{item.verified_grade}</strong><span>{item.estimated_grade ?? '—'}</span></div>)}</div> : null}<InlineNotice>Board angles and grade systems are charted separately. Ordinals only place labels in order; spacing does not imply linear physiological improvement.</InlineNotice></Card>
-    <section><SectionHeading title="Home-gym set comparison" description="Grade pyramids preserve the distribution instead of collapsing climbing into one score." />{data.gym_sets.length ? <GymSetComparison sets={data.gym_sets} /> : <EmptyState title="No completed gym sets" message="Set comparisons appear after a reset has preserved historical colour progress." />}</section>
+    <section><SectionHeading title="Home-gym set comparison" description="Update the current set here. Starting a new set closes the current batch and preserves it in history." action={<div className="button-row">{activeSet && <Button variant="ghost" icon="edit" onClick={() => setProgressOpen(true)}>Update current set</Button>}<Button icon="plus" onClick={() => setNewSetOpen(true)}>New set</Button></div>} />{data.gym_sets.length ? <GymSetComparison sets={data.gym_sets} /> : <EmptyState title="No gym sets yet" message="Start the current gym set. Every colour begins at zero without inventing progress." />}</section>
+    <Modal open={newSetOpen} title="Start a new gym set" onClose={() => setNewSetOpen(false)}><NewGymSetForm currentGym={activeSet?.gym ?? defaultGym} onSaved={() => { setNewSetOpen(false); onReload() }} /></Modal>
+    <Modal open={progressOpen} title="Update current set" onClose={() => setProgressOpen(false)} wide>{activeSet && <GymProgressForm gymSet={activeSet} onSaved={() => { setProgressOpen(false); onReload() }} />}</Modal>
   </div>
 }
 
@@ -86,5 +93,12 @@ function TB2AngleCharts({ benchmarks }: { benchmarks: ProgressData['climbing']['
 
 function GymSetComparison({ sets }: { sets: GymSet[] }): React.JSX.Element {
   const [mode, setMode] = useState<'absolute' | 'percent'>('absolute')
-  return <><div className="mode-toggle"><Button variant={mode === 'absolute' ? 'primary' : 'ghost'} onClick={() => setMode('absolute')}>Absolute sends</Button><Button variant={mode === 'percent' ? 'primary' : 'ghost'} onClick={() => setMode('percent')}>Completion %</Button></div><div className="gym-comparison-grid">{sets.map((set) => <Card key={set.id} title={`${set.gym} · ${formatDate(set.start_date, { month: 'short', year: 'numeric' })}${set.is_demo ? ' · DEMO' : ''}`}><GradePyramid mode={mode} rows={set.progress.map((row) => ({ label: row.colour, value: row.sent_count, available: row.available_problem_count, colour: colours[row.colour] }))} />{mode === 'percent' && !set.progress.some((row) => row.available_problem_count) && <p className="chart-footnote">Available counts were not recorded for this set.</p>}</Card>)}</div></>
+  return <><div className="mode-toggle"><Button variant={mode === 'absolute' ? 'primary' : 'ghost'} onClick={() => setMode('absolute')}>Absolute sends</Button><Button variant={mode === 'percent' ? 'primary' : 'ghost'} onClick={() => setMode('percent')}>Completion %</Button></div><div className="gym-comparison-grid">{sets.map((set) => {
+    const highest = [...set.progress].filter((row) => row.sent_count > 0).sort((left, right) => right.ordinal - left.ordinal).slice(0, 2)
+    return <Card key={set.id} title={`${set.gym} · ${formatDate(set.start_date, { month: 'short', year: 'numeric' })}${set.is_active ? ' · CURRENT' : ''}${set.is_demo ? ' · DEMO' : ''}`}><div className="gym-set-comparison-content"><div><GradePyramid mode={mode} rows={set.progress.map((row) => ({ label: row.colour, value: row.sent_count, available: row.available_problem_count, colour: colours[row.colour] }))} />{mode === 'percent' && !set.progress.some((row) => row.available_problem_count) && <p className="chart-footnote">Available counts were not recorded for this set.</p>}</div><div className="gym-set-highlights"><span className="eyebrow">TOP COMPLETED COLOURS</span><GymSetHighlight rank="Highest" row={highest[0]} /><GymSetHighlight rank="Second highest" row={highest[1]} /></div></div></Card>
+  })}</div></>
+}
+
+function GymSetHighlight({ rank, row }: { rank: string; row?: GymSet['progress'][number] }): React.JSX.Element {
+  return <div className="gym-set-highlight"><span>{rank}</span>{row ? <><strong><i style={{ background: colours[row.colour] }} />{row.colour}</strong><b>{row.sent_count} sent</b></> : <strong>Not yet recorded</strong>}</div>
 }

@@ -251,6 +251,7 @@ def gym_set(item: models.GymSet) -> dict[str, Any]:
         "start_date": item.start_date.isoformat(),
         "end_date": item.end_date.isoformat() if item.end_date else None,
         "notes": item.notes,
+        "is_active": item.is_active,
         "is_demo": item.is_demo,
         "progress": [
             {

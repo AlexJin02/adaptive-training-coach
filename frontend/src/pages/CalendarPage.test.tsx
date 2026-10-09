@@ -4,6 +4,8 @@ import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { weekDates } from '../lib/format'
 import { CalendarPage } from './CalendarPage'
+import { CapabilityProvider } from '../app/CapabilityProvider'
+import { capabilitiesOff } from '../test/fixtures'
 
 describe('calendar planning', () => {
   afterEach(() => { vi.unstubAllGlobals() })
@@ -35,6 +37,7 @@ describe('calendar planning', () => {
     const emptyDays = await screen.findAllByRole('button', { name: 'Plan or rest' })
     await user.click(emptyDays[0]!)
     expect(screen.getByLabelText(/^Duration/)).toHaveValue('45:00')
+    expect(screen.getByLabelText(/^Duration/)).toHaveAttribute('inputmode', 'text')
     await user.selectOptions(screen.getByLabelText('Activity'), 'STRENGTH')
     await user.selectOptions(screen.getByLabelText('Session type'), sessionType)
     expect(screen.getByLabelText('Planned exercise 1')).toHaveValue(exercise)
@@ -85,7 +88,65 @@ describe('calendar planning', () => {
     expect(detail.getByText('Actual result')).toBeInTheDocument()
     expect(detail.getByText('How this run felt')).toBeInTheDocument()
     expect(detail.getByText('心肺受控，最後兩圈腿有點沉。')).toBeInTheDocument()
-    expect(detail.getByText(/lap index: 1/)).toBeInTheDocument()
+    expect(detail.getByText('Lap details')).toBeInTheDocument()
+    expect(detail.getByText('1.00 km')).toBeInTheDocument()
+    expect(detail.getByText('5:05 /km')).toBeInTheDocument()
+    expect(detail.queryByText(/lap index:/i)).not.toBeInTheDocument()
+  })
+
+  it('shows completed climbing attempts as a readable table', async () => {
+    const date = weekDates(new Date())[0]!
+    const entry = {
+      id: 'planned-9', date, status: 'COMPLETED',
+      planned: { id: 9, date, workout_kind: 'CLIMBING', session_type: 'BOARD', title: 'TB2 Session', status: 'COMPLETED', planned_duration_minutes: 90, structured_blocks: [] },
+      completed: { id: 51, planned_session_id: 9, date, workout_kind: 'CLIMBING', session_type: 'BOARD', title: 'TB2 Session', duration_minutes: 92, rpe: 8, board_name: 'Tension Board 2', angle: 40, climbing_attempts: [{ problem: 'Blue 7', grade: '7A', attempts: 4, sent: true, send_count: 1, style_tags: ['crimp', 'technical'] }] },
+    }
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ items: [entry] }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+    const user = userEvent.setup()
+    render(<MemoryRouter><CalendarPage /></MemoryRouter>)
+
+    const title = await screen.findByText('TB2 Session')
+    await user.click(title.closest('article')!)
+    const detail = within(screen.getByRole('dialog', { name: 'Session Detail' }))
+    expect(detail.getByText('Climbing attempts')).toBeInTheDocument()
+    expect(detail.getByText('Blue 7')).toBeInTheDocument()
+    expect(detail.getByText('7A')).toBeInTheDocument()
+    expect(detail.getByText('Sent')).toBeInTheDocument()
+    expect(detail.getByText('crimp, technical')).toBeInTheDocument()
+    expect(detail.queryByText(/problem: Blue 7/i)).not.toBeInTheDocument()
+  })
+
+  it('edits the completed result from Calendar without changing the planned prescription', async () => {
+    const date = weekDates(new Date())[0]!
+    const entry = {
+      id: 'planned-8', date, status: 'COMPLETED',
+      planned: { id: 8, date, workout_kind: 'RUNNING', session_type: 'QUALITY', title: 'Threshold plan', status: 'COMPLETED', planned_duration_minutes: 60, structured_blocks: [{ label: 'Main', raw_text: '4 x 8 min threshold' }] },
+      completed: { id: 50, planned_session_id: 8, date, workout_kind: 'RUNNING', session_type: 'QUALITY', title: 'Threshold result', duration_minutes: 51, distance_km: 10, rpe: 7, splits: [], interval_blocks: [], climbing_attempts: [], strength_sets: [] },
+    }
+    const mock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      const body = url.includes('/capabilities') ? capabilitiesOff
+        : url.includes('/completed-sessions/50') && init?.method === 'PATCH' ? entry.completed
+          : url.includes('/planned-sessions') ? { items: [entry.planned], total: 1 }
+            : { items: [entry], total: 1 }
+      return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    })
+    vi.stubGlobal('fetch', mock)
+    const user = userEvent.setup()
+    render(<MemoryRouter><CapabilityProvider><CalendarPage /></CapabilityProvider></MemoryRouter>)
+
+    const title = await screen.findByText('Threshold result')
+    await user.click(title.closest('article')!)
+    await user.click(screen.getByRole('button', { name: 'Edit completed workout' }))
+    expect(screen.getByLabelText('Title')).toHaveValue('Threshold result')
+    await user.clear(screen.getByLabelText(/RPE \(1–10\)/))
+    await user.type(screen.getByLabelText(/RPE \(1–10\)/), '6')
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+
+    await waitFor(() => expect(mock.mock.calls.some(([input, init]) => String(input).includes('/completed-sessions/50') && init?.method === 'PATCH')).toBe(true))
+    const patchCall = mock.mock.calls.find(([input, init]) => String(input).includes('/completed-sessions/50') && init?.method === 'PATCH')
+    expect(JSON.parse(String(patchCall?.[1]?.body))).toMatchObject({ planned_session_id: '8', rpe: 6, title: 'Threshold result' })
+    expect(mock.mock.calls.some(([input, init]) => String(input).includes('/planned-sessions/8') && init?.method === 'PATCH')).toBe(false)
   })
 
   it('opens a requested planned session from the Today deep link', async () => {

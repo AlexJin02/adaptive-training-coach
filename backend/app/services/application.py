@@ -66,6 +66,12 @@ def get_completed_session(db: Session, session_id: int) -> models.CompletedSessi
     return core.get_completed_session(db, session_id)
 
 
+def update_completed_session(
+    db: Session, session_id: int, values: dict[str, Any]
+) -> models.CompletedSession:
+    return core.update_completed_session(db, session_id, values)
+
+
 def cancel_planned_session(db: Session, session_id: int) -> models.PlannedSession:
     item = db.get(models.PlannedSession, session_id)
     if item is None:

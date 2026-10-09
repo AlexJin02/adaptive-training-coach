@@ -435,7 +435,14 @@ def _validate_provider_output(output_type: type[BaseModel], data: Any) -> Any:
 
 
 def _responses_json(
-    *, system: str, user_content: Any, schema_name: str, schema: dict[str, Any], model: str
+    *,
+    system: str,
+    user_content: Any,
+    schema_name: str,
+    schema: dict[str, Any],
+    model: str,
+    reasoning_effort: str | None = None,
+    request_timeout_seconds: float = 60,
 ) -> dict[str, Any]:
     settings = get_settings()
     key = _require_key(settings)
@@ -452,12 +459,14 @@ def _responses_json(
             }
         },
     }
+    if reasoning_effort is not None:
+        payload["reasoning"] = {"effort": reasoning_effort}
     try:
         response = httpx.post(
             "https://api.openai.com/v1/responses",
             headers={"Authorization": f"Bearer {key}"},
             json=payload,
-            timeout=60,
+            timeout=request_timeout_seconds,
         )
         response.raise_for_status()
         body = response.json()
@@ -572,6 +581,7 @@ def extract_workout_from_text(
         schema_name="workout_extraction",
         schema=_workout_schema(),
         model=settings.openai_model,
+        reasoning_effort="minimal",
     )
     extraction = _validate_provider_output(WorkoutExtraction, data)
     return normalise_workout_extraction(extraction, reference_date=local_date)
@@ -768,6 +778,8 @@ def _typed_planner_call(
         schema_name=name,
         schema=output_type.model_json_schema(),
         model=settings.openai_planner_model,
+        reasoning_effort="low",
+        request_timeout_seconds=120,
     )
     return _validate_provider_output(output_type, data)
 

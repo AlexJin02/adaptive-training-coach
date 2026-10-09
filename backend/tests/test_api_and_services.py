@@ -86,6 +86,118 @@ def test_rpe_contract_rejects_zero(client: TestClient) -> None:
     assert plan.status_code == 422
 
 
+def test_completed_session_can_be_edited_with_detailed_evidence(client: TestClient) -> None:
+    created = client.post(
+        "/api/v1/completed-sessions",
+        json={
+            "date": "2026-08-20",
+            "workout_kind": "RUNNING",
+            "session_type": "EASY",
+            "title": "Wrong run",
+            "duration_minutes": 45,
+            "distance_km": 8,
+            "rpe": 4,
+            "splits": [{"distance_km": 1, "elapsed_time_seconds": 330}],
+        },
+    )
+    assert created.status_code == 201
+    session_id = created.json()["id"]
+
+    corrected_run = client.patch(
+        f"/api/v1/completed-sessions/{session_id}",
+        json={
+            "date": "2026-08-20",
+            "workout_kind": "RUNNING",
+            "session_type": "QUALITY",
+            "title": "Corrected run",
+            "duration_minutes": 46,
+            "distance_km": 8.2,
+            "average_pace": "5:36",
+            "rpe": 6,
+            "splits": [
+                {
+                    "lap_index": 1,
+                    "distance_km": 1,
+                    "elapsed_time_seconds": 336,
+                    "average_hr": 152,
+                    "cadence": 176,
+                }
+            ],
+            "subjective_feedback_text": "Controlled effort.",
+            "subjective_feedback_source": "TEXT",
+        },
+    )
+    assert corrected_run.status_code == 200
+    assert corrected_run.json()["title"] == "Corrected run"
+    assert corrected_run.json()["splits"][0]["cadence"] == 176
+    assert corrected_run.json()["subjective_feedback_text"] == "Controlled effort."
+
+    updated = client.patch(
+        f"/api/v1/completed-sessions/{session_id}",
+        json={
+            "date": "2026-08-21",
+            "start_time": "18:30",
+            "workout_kind": "CLIMBING",
+            "session_type": "BOARD",
+            "title": "Tension Board session",
+            "duration_minutes": 92,
+            "rpe": 8,
+            "board_name": "Tension Board 2",
+            "angle": 40,
+            "hard_attempts": 6,
+            "max_sent": "7A",
+            "climbing_attempts": [
+                {
+                    "problem": "Blue 7",
+                    "grade": "7A",
+                    "attempts": 4,
+                    "send_count": 1,
+                    "styles": ["crimp", "technical"],
+                }
+            ],
+        },
+    )
+
+    assert updated.status_code == 200
+    body = updated.json()
+    assert body["id"] == session_id
+    assert body["date"] == "2026-08-21"
+    assert body["start_time"] == "18:30"
+    assert body["workout_kind"] == "CLIMBING"
+    assert body["board_name"] == "Tension Board 2"
+    assert body["splits"] == []
+    assert body["climbing_attempts"][0] == {
+        "id": body["climbing_attempts"][0]["id"],
+        "problem": "Blue 7",
+        "grade": "7A",
+        "attempts": 4,
+        "sent": False,
+        "send_count": 1,
+        "flash": False,
+        "repeat": False,
+        "project": False,
+        "style_tags": ["crimp", "technical"],
+    }
+    listed = client.get("/api/v1/completed-sessions").json()["items"]
+    assert (
+        next(item for item in listed if item["id"] == session_id)["title"]
+        == "Tension Board session"
+    )
+
+
+def test_completed_session_edit_returns_not_found(client: TestClient) -> None:
+    response = client.patch(
+        "/api/v1/completed-sessions/99999",
+        json={
+            "date": "2026-08-21",
+            "workout_kind": "RUNNING",
+            "session_type": "EASY",
+            "duration_minutes": 45,
+        },
+    )
+    assert response.status_code == 404
+
+
 def test_planned_session_structured_blocks_round_trip(client: TestClient) -> None:
     structured_blocks = [
         {
@@ -548,6 +660,7 @@ def test_gym_progress_patch_rejects_sent_above_available(client: TestClient) -> 
         },
     )
     assert created.status_code == 201
+    assert created.json()["is_active"] is True
     response = client.patch(
         f"/api/v1/climbing/gym-sets/{created.json()['id']}/progress",
         json={"progress": [{"colour": "Yellow", "sent_count": 3, "available_problem_count": 2}]},

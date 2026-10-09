@@ -3,10 +3,12 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api, ApiError } from '../api/client'
 import { useResource } from '../api/hooks'
 import { Icon } from '../components/Icon'
+import { ClimbingAttemptTable, CompletedLapTable } from '../components/sessionDetails'
 import { SessionCard } from '../components/training'
 import { Button, Card, ErrorPanel, Field, FormActions, InlineNotice, LoadingGrid, Modal, PageHeader, Pill, SelectField, TextAreaField, formatEnum } from '../components/ui'
-import { addDays, formatDate, formatDuration, formatNumber, formatPace, localIsoDate, parseDurationInput, recordLabel, startOfWeek, weekDates } from '../lib/format'
+import { addDays, formatDate, formatDuration, formatNumber, formatPace, localIsoDate, parseDurationInput, startOfWeek, weekDates } from '../lib/format'
 import type { CalendarEntry, PlannedSession, WorkoutKind } from '../types'
+import { CompletedSessionEditForm } from './WorkoutLogPage'
 
 const sessionOptions: Record<WorkoutKind, string[]> = {
   RUNNING: ['EASY', 'LONG_RUN', 'QUALITY', 'RACE'],
@@ -94,7 +96,7 @@ function PlannedSessionForm({ defaultDate, onSaved }: { defaultDate: string; onS
       <Field label="Date" type="date" required value={form.date} onChange={(event) => setForm((current) => ({ ...current, date: event.target.value }))} />
       <Field label="Start time" type="time" disabled={form.plan_type === 'REST'} value={form.start_time} onChange={(event) => setForm((current) => ({ ...current, start_time: event.target.value }))} />
       <SelectField label="Priority" disabled={form.plan_type === 'REST'} value={form.priority} onChange={(event) => setForm((current) => ({ ...current, priority: event.target.value }))}><option>LOW</option><option>NORMAL</option><option>HIGH</option></SelectField>
-      <Field label="Duration" inputMode="numeric" placeholder="45:00 or 1:05:01" disabled={form.plan_type === 'REST'} value={form.planned_duration_minutes} onChange={(event) => setForm((current) => ({ ...current, planned_duration_minutes: event.target.value }))} hint="M:SS or H:MM:SS; plain numbers mean minutes." />
+      <Field label="Duration" inputMode="text" placeholder="45:00 or 1:05:01" disabled={form.plan_type === 'REST'} value={form.planned_duration_minutes} onChange={(event) => setForm((current) => ({ ...current, planned_duration_minutes: event.target.value }))} hint="M:SS or H:MM:SS; plain numbers mean minutes." />
       <Field label="Distance (km)" type="number" min="0" step="0.1" disabled={form.plan_type === 'REST' || kind !== 'RUNNING'} value={form.planned_distance_km} onChange={(event) => setForm((current) => ({ ...current, planned_distance_km: event.target.value }))} />
       <Field label="Target RPE" type="number" min="1" max="10" disabled={form.plan_type === 'REST'} value={form.target_rpe} onChange={(event) => setForm((current) => ({ ...current, target_rpe: event.target.value }))} />
     </div>
@@ -109,7 +111,8 @@ function PlannedSessionForm({ defaultDate, onSaved }: { defaultDate: string; onS
 function SessionDetail({ entry, onChanged, onComplete }: { entry: CalendarEntry; onChanged: () => void; onComplete: (id: string | number) => void }): React.JSX.Element {
   const plan = entry.planned
   const actual = entry.completed
-  const [editing, setEditing] = useState(false)
+  const [editingPlan, setEditingPlan] = useState(false)
+  const [editingActual, setEditingActual] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const remove = async () => {
@@ -119,7 +122,8 @@ function SessionDetail({ entry, onChanged, onComplete }: { entry: CalendarEntry;
     catch (reason) { setError(reason instanceof ApiError ? reason.message : 'Unable to remove this session.') }
     finally { setBusy(false) }
   }
-  if (editing && plan) return <PlannedSessionEditForm plan={plan} onCancel={() => setEditing(false)} onSaved={onChanged} />
+  if (editingActual && actual) return <CompletedSessionEditForm session={actual} onCancel={() => setEditingActual(false)} onSaved={onChanged} />
+  if (editingPlan && plan) return <PlannedSessionEditForm plan={plan} onCancel={() => setEditingPlan(false)} onSaved={onChanged} />
   const session = actual ?? plan
   if (!session) return <InlineNotice>Rest day</InlineNotice>
   return <div className="session-detail stack-form">
@@ -127,10 +131,11 @@ function SessionDetail({ entry, onChanged, onComplete }: { entry: CalendarEntry;
     <div className="form-grid four"><div><span className="field-label">Distance</span><strong>{(actual?.distance_km ?? plan?.planned_distance_km) != null ? `${formatNumber(actual?.distance_km ?? plan?.planned_distance_km, 1)} km` : 'N/A'}</strong></div><div><span className="field-label">Duration</span><strong>{formatDuration(actual?.duration_minutes ?? plan?.planned_duration_minutes)}</strong></div><div><span className="field-label">Target RPE</span><strong>{plan?.target_rpe ?? actual?.rpe ?? 'N/A'}</strong></div><div><span className="field-label">Start</span><strong>{session.start_time?.slice(0, 5) ?? 'Any time'}</strong></div></div>
     {plan?.structured_blocks?.length ? <div className="prescription"><h3>Full prescription</h3>{plan.structured_blocks.map((block, index) => <PrescriptionBlock block={block} key={index} />)}</div> : plan?.description ? <Card title="Workout"><p className="pre-wrap">{plan.description}</p></Card> : <InlineNotice>No structured workout prescription was provided.</InlineNotice>}
     {plan?.description && plan.structured_blocks?.length ? <Card title="Notes"><p className="pre-wrap">{plan.description}</p></Card> : null}
-    {actual && <Card title="Actual result"><div className="form-grid four"><div><span className="field-label">Actual type</span><strong>{formatEnum(actual.session_type)}</strong></div><div><span className="field-label">Distance</span><strong>{actual.distance_km != null ? `${formatNumber(actual.distance_km, 2)} km` : 'N/A'}</strong></div><div><span className="field-label">Elapsed time</span><strong>{formatDuration(actual.duration_minutes)}</strong></div><div><span className="field-label">RPE</span><strong>{actual.rpe ?? 'Not recorded'}</strong></div>{actual.average_pace_seconds_per_km != null && <div><span className="field-label">Average pace</span><strong>{formatPace(actual.average_pace_seconds_per_km)} /km</strong></div>}{actual.average_hr != null && <div><span className="field-label">Heart rate</span><strong>{actual.average_hr} avg{actual.max_hr ? ` · ${actual.max_hr} max` : ''}</strong></div>}</div>{actual.splits?.length ? <div className="calendar-actual-laps"><h3>Laps</h3>{actual.splits.map((lap, index) => <pre className="detail-json" key={index}>{recordLabel(lap)}</pre>)}</div> : null}{actual.subjective_feedback_text && <div className="calendar-run-feedback"><h3>How this run felt</h3><p className="pre-wrap">{actual.subjective_feedback_text}</p><small>{actual.subjective_feedback_source === 'VOICE' ? 'Reviewed voice transcript' : 'Written feedback'}</small></div>}</Card>}
+    {actual && <Card title="Actual result"><div className="form-grid four"><div><span className="field-label">Actual type</span><strong>{formatEnum(actual.session_type)}</strong></div><div><span className="field-label">Distance</span><strong>{actual.distance_km != null ? `${formatNumber(actual.distance_km, 2)} km` : 'N/A'}</strong></div><div><span className="field-label">Elapsed time</span><strong>{formatDuration(actual.duration_minutes)}</strong></div><div><span className="field-label">RPE</span><strong>{actual.rpe ?? 'Not recorded'}</strong></div>{actual.average_pace_seconds_per_km != null && <div><span className="field-label">Average pace</span><strong>{formatPace(actual.average_pace_seconds_per_km)} /km</strong></div>}{actual.average_hr != null && <div><span className="field-label">Heart rate</span><strong>{actual.average_hr} avg{actual.max_hr ? ` · ${actual.max_hr} max` : ''}</strong></div>}</div><CompletedLapTable records={actual.splits} /><ClimbingAttemptTable records={actual.climbing_attempts} />{actual.subjective_feedback_text && <div className="calendar-run-feedback"><h3>How this run felt</h3><p className="pre-wrap">{actual.subjective_feedback_text}</p><small>{actual.subjective_feedback_source === 'VOICE' ? 'Reviewed voice transcript' : 'Written feedback'}</small></div>}</Card>}
     {error && <InlineNotice tone="warning">{error}</InlineNotice>}
-    {plan && !actual && entry.status !== 'REST' && <FormActions><Button variant="danger" disabled={busy} onClick={() => void remove()}>{busy ? 'Removing…' : 'Delete'}</Button><Button variant="ghost" onClick={() => setEditing(true)}>Edit</Button><Button onClick={() => onComplete(plan.id)}>Mark Complete</Button></FormActions>}
-    {plan && !actual && entry.status === 'REST' && <FormActions><Button variant="danger" disabled={busy} onClick={() => void remove()}>Delete</Button><Button variant="ghost" onClick={() => setEditing(true)}>Edit</Button></FormActions>}
+    {actual && <FormActions><Button variant="ghost" icon="edit" onClick={() => setEditingActual(true)}>Edit completed workout</Button></FormActions>}
+    {plan && !actual && entry.status !== 'REST' && <FormActions><Button variant="danger" disabled={busy} onClick={() => void remove()}>{busy ? 'Removing…' : 'Delete'}</Button><Button variant="ghost" onClick={() => setEditingPlan(true)}>Edit</Button><Button onClick={() => onComplete(plan.id)}>Mark Complete</Button></FormActions>}
+    {plan && !actual && entry.status === 'REST' && <FormActions><Button variant="danger" disabled={busy} onClick={() => void remove()}>Delete</Button><Button variant="ghost" onClick={() => setEditingPlan(true)}>Edit</Button></FormActions>}
     {plan && !actual && <p className="card-note">Delete removes the session from the active Calendar while preserving its revision history.</p>}
   </div>
 }

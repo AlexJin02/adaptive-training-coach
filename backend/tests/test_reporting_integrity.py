@@ -6,8 +6,16 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app import api as api_module
+from app import models
 from app.ai.functions import WeeklyReviewInput, WeeklyReviewOutput
-from app.enums import FatigueDomain, PlanStatus
+from app.enums import (
+    AdaptationAction,
+    AdaptationDecision,
+    AdaptationSource,
+    Confidence,
+    FatigueDomain,
+    PlanStatus,
+)
 from app.services import core, reporting
 
 
@@ -109,7 +117,7 @@ def test_readiness_api_exposes_local_soreness_and_modifiers(client: TestClient) 
     checkin = client.post(
         "/api/v1/recovery-checkins",
         json={
-            "date": (date.today() - timedelta(days=1)).isoformat(),
+            "date": date.today().isoformat(),
             "sleep_duration_hours": 5,
             "sleep_quality": 1,
             "energy": 1,
@@ -168,8 +176,39 @@ def test_fatigue_api_labels_engine_boundaries(
     assert items["FINGER_FOREARM"]["is_high"] is False
 
 
-def test_adaptation_edits_reject_unknown_and_negative_fields(client: TestClient) -> None:
-    assert client.post("/api/v1/demo/seed").status_code == 200
+def test_adaptation_edits_reject_unknown_and_negative_fields(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def create_pending_proposal(db: Session) -> list[models.AdaptationEvent]:
+        planned = core.create_planned_session(
+            db,
+            {
+                "date": date.today() + timedelta(days=1),
+                "workout_kind": "RUNNING",
+                "session_type": "QUALITY",
+                "title": "Controlled threshold",
+                "planned_duration_minutes": 45,
+                "target_rpe": 7,
+            },
+        )
+        original = core.plan_snapshot(planned)
+        event = models.AdaptationEvent(
+            affected_session_id=planned.id,
+            original_plan=original,
+            proposed_plan={**original, "planned_duration_minutes": 35},
+            action=AdaptationAction.REDUCE_VOLUME,
+            reason="Test proposal",
+            evidence=["Deterministic test evidence"],
+            confidence=Confidence.HIGH,
+            source=AdaptationSource.RULE_ENGINE,
+            decision=AdaptationDecision.PENDING,
+        )
+        db.add(event)
+        db.commit()
+        db.refresh(event)
+        return [event]
+
+    monkeypatch.setattr(core, "create_adaptation_proposals", create_pending_proposal)
     proposals = client.post("/api/v1/adaptations/propose").json()["items"]
     assert proposals
     proposal_id = proposals[0]["id"]

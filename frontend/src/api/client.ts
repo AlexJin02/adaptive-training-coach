@@ -30,6 +30,11 @@ import type {
 // Production is always served by FastAPI as a one-origin app (including Tailscale phone access).
 // Only Vite development may point directly at the local backend.
 const API_BASE = (import.meta.env.PROD ? '/api/v1' : import.meta.env.VITE_API_BASE_URL ?? '/api/v1').replace(/\/$/, '')
+const DEFAULT_REQUEST_TIMEOUT_MS = 20_000
+const EXTERNAL_SYNC_REQUEST_TIMEOUT_MS = 60_000
+const WORKOUT_EXTRACTION_REQUEST_TIMEOUT_MS = 70_000
+const TRANSCRIPTION_REQUEST_TIMEOUT_MS = 90_000
+const AI_PLANNING_REQUEST_TIMEOUT_MS = 130_000
 
 function audioUploadFilename(file: Blob, stem: string): string {
   const mediaType = (file.type.split(';', 1)[0] ?? '').toLowerCase()
@@ -67,9 +72,9 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+async function request<T>(path: string, init: RequestInit = {}, timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS): Promise<T> {
   const controller = new AbortController()
-  const timeout = window.setTimeout(() => controller.abort(), 20_000)
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs)
   try {
     const isForm = init.body instanceof FormData
     const response = await fetch(`${API_BASE}${path}`, {
@@ -144,9 +149,10 @@ export const api = {
   skipPlannedSession: (id: string | number) => request<{ session: PlannedSession; adaptations: AdaptationProposal[] }>(`/planned-sessions/${id}/skip`, { method: 'POST', body: '{}' }),
   completedSessions: () => request<ApiList<CompletedSession>>('/completed-sessions'),
   stravaRunInbox: () => request<ApiList<ImportedRunningActivity>>('/integrations/strava/runs/inbox'),
-  syncStravaRuns: () => request<ApiList<ImportedRunningActivity> & { imported: number; restored: number; enriched: number }>('/integrations/strava/sync', { method: 'POST', body: '{}' }),
+  syncStravaRuns: () => request<ApiList<ImportedRunningActivity> & { imported: number; restored: number; enriched: number }>('/integrations/strava/sync', { method: 'POST', body: '{}' }, EXTERNAL_SYNC_REQUEST_TIMEOUT_MS),
   completeStravaRun: (id: string | number, body: { session_type: string; title?: string; rpe: number; subjective_feedback_text?: string | null; subjective_feedback_source?: 'VOICE' | 'TEXT' | 'NONE' }) => request<CompletedSession>(`/integrations/strava/runs/${id}/complete`, { method: 'POST', body: json(body) }),
   createCompletedSession: (body: Record<string, unknown>) => request<Record<string, unknown>>('/completed-sessions', { method: 'POST', body: json(body) }),
+  updateCompletedSession: (id: string | number, body: Record<string, unknown>) => request<CompletedSession>(`/completed-sessions/${id}`, { method: 'PATCH', body: json(body) }),
   deleteCompletedSession: (id: string | number) => request<{ deleted: boolean; id: number }>(`/completed-sessions/${id}`, { method: 'DELETE' }),
   fatigue: () => request<ApiList<FatigueValue>>('/load-readiness/fatigue'),
   readiness: () => request<ApiList<ReadinessSummary>>('/load-readiness/readiness'),
@@ -160,7 +166,7 @@ export const api = {
   currentMonthlyBlock: () => request<MonthlyTrainingBlock | null>('/training-plans/monthly/current'),
   updateMonthlyBlock: (id: number, content: Omit<MonthlyPlanContent, 'month' | 'raw_plan_text'>) => request<MonthlyTrainingBlock>(`/training-plans/monthly/${id}`, { method: 'PATCH', body: json(content) }),
   adaptations: () => request<ApiList<AdaptationProposal>>('/adaptations'),
-  proposeAdaptation: () => request<ApiList<AdaptationProposal>>('/adaptations/propose', { method: 'POST', body: '{}' }),
+  proposeAdaptation: () => request<ApiList<AdaptationProposal>>('/adaptations/propose', { method: 'POST', body: '{}' }, AI_PLANNING_REQUEST_TIMEOUT_MS),
   decideAdaptation: (id: string | number, decision: 'ACCEPT' | 'REJECT', proposedPlan?: Record<string, unknown> | string) => request<AdaptationProposal>(`/adaptations/${id}/decision`, { method: 'POST', body: json({ decision, proposed_plan: proposedPlan }) }),
   tb2Benchmarks: () => request<ApiList<TB2Benchmark>>('/climbing/tb2-benchmarks'),
   createTb2Benchmark: (body: Partial<TB2Benchmark>) => request<TB2Benchmark>('/climbing/tb2-benchmarks', { method: 'POST', body: json(body) }),
@@ -170,36 +176,36 @@ export const api = {
   notes: (query = '') => request<ApiList<TrainingNote>>(`/training-notes${query ? `?${query}` : ''}`),
   createNote: (body: Partial<TrainingNote>) => request<TrainingNote>('/training-notes', { method: 'POST', body: json(body) }),
   createCoachingPrinciple: (body: { principle: string; source_note_id: string | number }) => request<Record<string, unknown>>('/coaching-principles', { method: 'POST', body: json(body) }),
-  processNote: (body: Record<string, unknown>) => request<Partial<TrainingNote>>('/ai/notes/process', { method: 'POST', body: json(body) }),
+  processNote: (body: Record<string, unknown>) => request<Partial<TrainingNote>>('/ai/notes/process', { method: 'POST', body: json(body) }, WORKOUT_EXTRACTION_REQUEST_TIMEOUT_MS),
   transcribeNote: (file: Blob, retain = false) => {
     const data = new FormData()
     data.append('audio', file, audioUploadFilename(file, 'training-note'))
     data.append('retain_raw', String(retain))
-    return request<{ transcript: string }>('/ai/notes/transcribe', { method: 'POST', body: data })
+    return request<{ transcript: string }>('/ai/notes/transcribe', { method: 'POST', body: data }, TRANSCRIPTION_REQUEST_TIMEOUT_MS)
   },
   transcribeRunningFeedback: (file: Blob) => {
     const data = new FormData()
     data.append('audio', file, audioUploadFilename(file, 'running-feedback'))
     data.append('retain_raw', 'false')
-    return request<{ transcript: string }>('/ai/running-feedback/transcribe', { method: 'POST', body: data })
+    return request<{ transcript: string }>('/ai/running-feedback/transcribe', { method: 'POST', body: data }, TRANSCRIPTION_REQUEST_TIMEOUT_MS)
   },
   transcribeWorkoutInput: (file: Blob) => {
     const data = new FormData()
     data.append('audio', file, audioUploadFilename(file, 'workout-input'))
-    return request<{ transcript: string }>('/ai/workouts/transcribe', { method: 'POST', body: data })
+    return request<{ transcript: string }>('/ai/workouts/transcribe', { method: 'POST', body: data }, TRANSCRIPTION_REQUEST_TIMEOUT_MS)
   },
-  extractWorkoutText: (text: string) => request<WorkoutExtraction>('/ai/workouts/extract-text', { method: 'POST', body: json({ text }) }),
+  extractWorkoutText: (text: string) => request<WorkoutExtraction>('/ai/workouts/extract-text', { method: 'POST', body: json({ text }) }, WORKOUT_EXTRACTION_REQUEST_TIMEOUT_MS),
   extractWorkoutImage: (file: File, retain = false) => {
     const data = new FormData()
     data.append('image', file)
     data.append('retain_raw', String(retain))
-    return request<WorkoutExtraction>('/ai/workouts/extract-image', { method: 'POST', body: data })
+    return request<WorkoutExtraction>('/ai/workouts/extract-image', { method: 'POST', body: data }, TRANSCRIPTION_REQUEST_TIMEOUT_MS)
   },
   weeklyReviews: () => request<ApiList<WeeklyReview>>('/weekly-reviews'),
-  generateWeeklyReview: (weekStart: string) => request<WeeklyReview>('/weekly-reviews/generate', { method: 'POST', body: json({ week_start: weekStart }) }),
+  generateWeeklyReview: (weekStart: string) => request<WeeklyReview>('/weekly-reviews/generate', { method: 'POST', body: json({ week_start: weekStart }) }, AI_PLANNING_REQUEST_TIMEOUT_MS),
   reviewPlanProposals: (cadence?: 'WEEKLY' | 'MONTHLY') => request<ApiList<ReviewPlanProposal>>(`/review-plan/proposals${cadence ? `?cadence=${cadence}` : ''}`),
-  generateWeeklyPlan: (weekStart: string) => request<ReviewPlanProposal>('/review-plan/weekly/generate', { method: 'POST', body: json({ week_start: weekStart }) }),
-  generateMonthlyPlan: (monthStart: string) => request<ReviewPlanProposal>('/review-plan/monthly/generate', { method: 'POST', body: json({ month_start: monthStart }) }),
+  generateWeeklyPlan: (weekStart: string) => request<ReviewPlanProposal>('/review-plan/weekly/generate', { method: 'POST', body: json({ week_start: weekStart }) }, AI_PLANNING_REQUEST_TIMEOUT_MS),
+  generateMonthlyPlan: (monthStart: string) => request<ReviewPlanProposal>('/review-plan/monthly/generate', { method: 'POST', body: json({ month_start: monthStart }) }, AI_PLANNING_REQUEST_TIMEOUT_MS),
   editReviewPlan: (id: string | number, proposedPlan: Record<string, unknown>) => request<ReviewPlanProposal>(`/review-plan/proposals/${id}`, { method: 'PATCH', body: json({ proposed_plan: proposedPlan }) }),
   approveReviewPlan: (id: string | number) => request<ReviewPlanProposal>(`/review-plan/proposals/${id}/approve`, { method: 'POST', body: '{}' }),
   cancelReviewPlan: (id: string | number) => request<ReviewPlanProposal>(`/review-plan/proposals/${id}/cancel`, { method: 'POST', body: '{}' }),

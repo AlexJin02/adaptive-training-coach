@@ -52,6 +52,37 @@ def test_workout_extraction_contract_preserves_rpe_and_structured_fields(monkeyp
     assert {"title", "board_name", "angle", "max_hr", "splits", "intervals"}.issubset(
         captured["schema"]["properties"]
     )
+    assert captured["reasoning_effort"] == "minimal"
+
+
+def test_responses_json_sends_requested_reasoning_effort(monkeypatch) -> None:  # noqa: ANN001
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        functions,
+        "get_settings",
+        lambda: SimpleNamespace(openai_api_key="test-key"),
+    )
+
+    def fake_post(*_args, **kwargs):  # noqa: ANN003, ANN202
+        captured.update(kwargs)
+        return httpx.Response(
+            200,
+            json={"output_text": '{"value":"ok"}'},
+            request=httpx.Request("POST", "https://api.openai.com/v1/responses"),
+        )
+
+    monkeypatch.setattr(functions.httpx, "post", fake_post)
+    result = functions._responses_json(
+        system="Extract one value.",
+        user_content=[{"type": "input_text", "text": "ok"}],
+        schema_name="test_value",
+        schema={"type": "object"},
+        model="gpt-5-mini",
+        reasoning_effort="minimal",
+    )
+
+    assert result == {"value": "ok"}
+    assert captured["json"]["reasoning"] == {"effort": "minimal"}
 
 
 def test_workout_extraction_normalises_voice_friendly_formats(monkeypatch) -> None:  # noqa: ANN001
@@ -218,6 +249,52 @@ def test_session_and_weekly_ai_have_distinct_typed_outputs(monkeypatch) -> None:
         }
     )
     assert isinstance(weekly, WeeklyReviewOutput)
+
+
+def test_planner_uses_low_reasoning_and_extended_provider_timeout(monkeypatch) -> None:  # noqa: ANN001
+    captured: dict[str, object] = {}
+
+    def fake_call(**kwargs):  # noqa: ANN003, ANN202
+        captured.update(kwargs)
+        return {
+            "review": {
+                "summary": "Stable week",
+                "running_analysis": "Volume was consistent.",
+                "climbing_analysis": "Quality was maintained.",
+                "recovery_analysis": "No recovery concern was recorded.",
+                "key_findings": [],
+            },
+            "next_week": {
+                "summary": "Continue consistently.",
+                "running_target_km": 30,
+                "running_objectives": [],
+                "climbing_objectives": [],
+                "sessions": [],
+                "warnings": [],
+            },
+        }
+
+    monkeypatch.setattr(functions, "_responses_json", fake_call)
+    functions.review_and_plan_week(
+        {
+            "long_term_goals": [],
+            "long_term_summary": {},
+            "athlete_state": {},
+            "phases": {"running": "AEROBIC_BASE", "climbing": "TECHNIQUE_VOLUME"},
+            "this_week_summary": {},
+            "previous_weekly_summaries": [],
+            "current_monthly_block": {},
+            "load": {"running": 0, "climbing": 0},
+            "readiness": {"running": "UNKNOWN", "climbing": "UNKNOWN"},
+            "recent_recovery": [],
+            "upcoming_availability": [],
+            "locked_sessions": [],
+            "running_subjective_feedback": [],
+        }
+    )
+
+    assert captured["reasoning_effort"] == "low"
+    assert captured["request_timeout_seconds"] == 120
 
 
 def test_session_analysis_enforces_200_character_limit(monkeypatch) -> None:  # noqa: ANN001

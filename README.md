@@ -10,7 +10,7 @@ This README describes the checked-in runtime. [Product specification](docs/produ
 
 - Today's Training as the home view, weekly Calendar, editable planned sessions, and a filterable factual workout history
 - Running state, transparent volume trends, and comparable-HR easy-running efficiency
-- Climbing state, angle-aware Tension Board 2 benchmarks, home-gym set history, and route benchmarks
+- Climbing state, angle-aware Tension Board 2 benchmarks, and editable home-gym set history with highest-colour summaries
 - Strict running types (`EASY`, `LONG_RUN`, `QUALITY`, `RACE`) and climbing types (`BOULDERING`, `SPORT_CLIMBING`, `BOARD`)
 - Screenshot, natural-language, and voice-assisted workout entry with preview-before-save
 - Optional Strava running sync into a review Inbox with planned-session matching and lap detail

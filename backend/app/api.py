@@ -496,7 +496,7 @@ def capabilities() -> dict[str, Any]:
         "ai_session_analysis": False,
         "ai_adaptation": False,
         "ai_weekly_review": False,
-        "ai_planner": False,
+        "ai_planner": configured,
         "model": settings.openai_model if configured else None,
         "planner_model": settings.openai_planner_model if configured else None,
         "vision_model": settings.openai_vision_model if configured else None,
@@ -649,6 +649,21 @@ def save_completed_session(
         item = application.record_completed_session(db, payload.model_dump())
         return serializers.completed_session(item)
     except (ValueError, LookupError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.patch("/completed-sessions/{session_id}")
+def update_completed_session(
+    session_id: int,
+    payload: CompletedSessionInput,
+    db: DatabaseSession = Depends(get_db),
+) -> dict[str, Any]:
+    try:
+        item = application.update_completed_session(db, session_id, payload.model_dump())
+        return serializers.completed_session(item)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 

@@ -59,6 +59,7 @@ describe('athlete climbing goals', () => {
     render(<SettingsPage />)
 
     expect(await screen.findByLabelText('Current HM performance')).toHaveValue('1:45:00')
+    expect(screen.getByLabelText('Current HM performance')).toHaveAttribute('inputmode', 'text')
     const primary = screen.getByLabelText('Primary HM goal')
     expect(primary).toHaveValue('1:29:59')
     await user.clear(primary)
